@@ -133,6 +133,7 @@ add_custom_command(
 set(ACCP_SRC
         src/com/amazon/corretto/crypto/provider/AccessibleByteArrayOutputStream.java
         src/com/amazon/corretto/crypto/provider/AesGcmSpi.java
+        src/com/amazon/corretto/crypto/provider/AesKeyWrapSpi.java
         src/com/amazon/corretto/crypto/provider/ConstantTime.java
         src/com/amazon/corretto/crypto/provider/DebugFlag.java
         src/com/amazon/corretto/crypto/provider/EcGen.java
