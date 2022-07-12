@@ -34,6 +34,7 @@ import javax.crypto.spec.IvParameterSpec;
  */
 final class AesKeyWrapSpi extends CipherSpi {
     private static final int BLOCK_SIZE = 128 / 8;
+    private static final byte[] ICV2 = { (byte) 0xa6, (byte) 0x59, (byte) 0x59, (byte) 0xa6 };
 
     static {
         Loader.load();
@@ -41,7 +42,7 @@ final class AesKeyWrapSpi extends CipherSpi {
     private final AmazonCorrettoCryptoProvider provider;
     private NativeResource context = null;
     private SecretKey jceKey;
-    private byte[] iv, key;
+    private byte[] key;
     private int opmode = -1;    // must be set by init(..)
 
     AesKeyWrapSpi(final AmazonCorrettoCryptoProvider provider) {
@@ -87,14 +88,14 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     @Override
     protected byte[] engineGetIV() {
-        return iv.clone();
+        return ICV2.clone();
     }
 
     @Override
     protected AlgorithmParameters engineGetParameters() {
         try {
             AlgorithmParameters parameters = AlgorithmParameters.getInstance("IV");
-            parameters.init(new IvParameterSpec(iv));
+            parameters.init(new IvParameterSpec(ICV2.clone()));
             return parameters;
         } catch (InvalidParameterSpecException | NoSuchAlgorithmException e) {
             throw new Error("Unexpected error", e);
@@ -105,7 +106,7 @@ final class AesKeyWrapSpi extends CipherSpi {
     protected void engineInit(int opmode, Key key, SecureRandom random)
         throws InvalidKeyException {
         try {
-            implInit(opmode, key, (byte[])null, random);
+            implInit(opmode, key, random);
         } catch (InvalidAlgorithmParameterException iae) {
             // should never happen
             throw new AssertionError(iae);
@@ -113,43 +114,37 @@ final class AesKeyWrapSpi extends CipherSpi {
     }
 
     @Override
-    protected void engineInit(int opmode, Key key, AlgorithmParameterSpec params, SecureRandom random)
+    protected void engineInit(int opmode, Key key, AlgorithmParameters params, SecureRandom random)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
-        if (params != null && !(params instanceof IvParameterSpec)) {
-            throw new InvalidAlgorithmParameterException(
-                "Only IvParameterSpec is accepted");
+        AlgorithmParameterSpec paramSpec = null;
+        if (params != null) {
+            try {
+                paramSpec = params.getParameterSpec(IvParameterSpec.class);
+            } catch (InvalidParameterSpecException ispe) {
+                throw new InvalidAlgorithmParameterException("Only IvParameterSpec is accepted");
+            }
         }
-        byte[] iv = (params == null? null : ((IvParameterSpec)params).getIV());
-        implInit(opmode, key, iv, random);
+        engineInit(opmode, key, paramSpec, random);
     }
 
     @Override
-    protected void engineInit(int opmode, Key key, AlgorithmParameters params, SecureRandom random)
-        throws InvalidKeyException, InvalidAlgorithmParameterException {
-        byte[] iv = null;
-        if (params != null) {
-            try {
-                AlgorithmParameterSpec spec =
-                        params.getParameterSpec(IvParameterSpec.class);
-                iv = ((IvParameterSpec)spec).getIV();
-            } catch (InvalidParameterSpecException ispe) {
-                throw new InvalidAlgorithmParameterException(
-                    "Only IvParameterSpec is accepted");
-            }
+    protected void engineInit(int opmode, Key key, AlgorithmParameterSpec params, SecureRandom random)
+            throws InvalidKeyException, InvalidAlgorithmParameterException {
+        if (params != null && !(params instanceof IvParameterSpec)
+                && !Arrays.equals(ICV2, ((IvParameterSpec) params).getIV())) {
+            throw new InvalidAlgorithmParameterException("Only ICV2 IvParameterSpec is accepted");
         }
-        try {
-            implInit(opmode, key, iv, random);
-        } catch (IllegalArgumentException iae) {
-            throw new InvalidAlgorithmParameterException(iae.getMessage());
-        }
+        implInit(opmode, key, random);
     }
 
-    // actual impl for various engineInit(...) methods
-    private void implInit(int opmode, Key key, byte[] iv, SecureRandom random)
+    private void implInit(int opmode, Key key, SecureRandom random)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
         byte[] keyBytes = key.getEncoded();
         if (keyBytes == null) {
             throw new InvalidKeyException("Null key");
+        }
+        if (opmode != Cipher.UNWRAP_MODE && opmode != Cipher.WRAP_MODE) {
+            throw new UnsupportedOperationException("Cipher only supports un/wrap modes");
         }
         this.opmode = opmode;
         boolean decrypting = opmode == Cipher.UNWRAP_MODE;
@@ -217,123 +212,3 @@ final class AesKeyWrapSpi extends CipherSpi {
         throw new UnsupportedOperationException();
     }
 }
-
-//     @Override
-//     protected void engineInit(final int opmode, final Key key, final SecureRandom secureRandom)
-//             throws InvalidKeyException {
-//         if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.WRAP_MODE) {
-//             throw new InvalidKeyException("IV required for decrypt");
-//         }
-// 
-//         final byte[] iv = new byte[12];
-//         secureRandom.nextBytes(iv);
-// 
-//         try {
-//             engineInit(opmode, key, new GCMParameterSpec(DEFAULT_TAG_LENGTH, iv), secureRandom);
-//         } catch (InvalidAlgorithmParameterException e) {
-//             throw new AssertionError(e);
-//         }
-//     }
-// 
-//     @Override
-//     protected void engineInit(
-//         final int jceOpMode,
-//         final Key key,
-//         final AlgorithmParameterSpec algorithmParameterSpec,
-//         final SecureRandom secureRandom
-//     ) throws InvalidKeyException, InvalidAlgorithmParameterException {
-//         if (key == null) {
-//             throw new InvalidKeyException("Key can't be null");
-//         }
-// 
-//         final GCMParameterSpec spec;
-//         if (algorithmParameterSpec instanceof GCMParameterSpec) {
-//             spec = (GCMParameterSpec) algorithmParameterSpec;
-//         } else if (algorithmParameterSpec instanceof IvParameterSpec) {
-//             spec = new GCMParameterSpec(DEFAULT_TAG_LENGTH,
-//                     ((IvParameterSpec) algorithmParameterSpec).getIV());
-//         } else {
-//             throw new InvalidAlgorithmParameterException(
-//                 "I don't know how to handle a " + algorithmParameterSpec.getClass());
-//         }
-// 
-//         byte[] encodedKey = null;
-//         if (jceKey != key) {
-//             if (!(key instanceof  SecretKey)) {
-//                 throw new InvalidKeyException("Need a SecretKey");
-//             }
-//             String keyAlgorithm = key.getAlgorithm();
-//             if (!"RAW".equalsIgnoreCase(key.getFormat())) {
-//                 throw new InvalidKeyException("Need a raw format key");
-//             }
-//             if (!keyAlgorithm.equalsIgnoreCase("AES")) {
-//                 throw new InvalidKeyException("Expected an AES key");
-//             }
-//             encodedKey = key.getEncoded();
-//             if (encodedKey == null) {
-//                 throw new InvalidKeyException("Key doesn't support encoding");
-//             }
-// 
-//             if (!MessageDigest.isEqual(encodedKey, this.key)) {
-//                 if (encodedKey.length != 128 / 8 && encodedKey.length != 192 / 8 && encodedKey.length != 256 / 8) {
-//                     throw new InvalidKeyException("Bad key length of " + (encodedKey.length * 8)
-//                         + " bits; expected 128, 192, or 256 bits");
-//                 }
-// 
-//                 keyUsageCount = 0;
-//                 if (context != null) {
-//                     context.release();
-//                 }
-// 
-//                 context = null;
-//             } else {
-//                 encodedKey = null;
-//             }
-//         }
-// 
-//         final byte[] iv = spec.getIV();
-// 
-//         if ((spec.getTLen() % 8 != 0) || spec.getTLen() > 128 || spec.getTLen() < 96) {
-//             throw new InvalidAlgorithmParameterException(
-//                 "Unsupported TLen value; must be one of {128, 120, 112, 104, 96}");
-//         }
-// 
-// 
-//         if (this.iv != null && this.key != null
-//                 && (jceOpMode == Cipher.ENCRYPT_MODE || jceOpMode == Cipher.WRAP_MODE)) {
-//             if (Arrays.equals(this.iv, iv) && (encodedKey == null || MessageDigest.isEqual(this.key, encodedKey))) {
-//                 throw new InvalidAlgorithmParameterException("Cannot reuse same iv and key for GCM encryption");
-//             }
-//         }
-// 
-//         if (iv == null || iv.length == 0) {
-//             throw new InvalidAlgorithmParameterException("IV must be at least one byte long");
-//         }
-// 
-//         switch (jceOpMode) {
-//             case Cipher.ENCRYPT_MODE:
-//             case Cipher.WRAP_MODE:
-//                 this.opmode = NATIVE_MODE_ENCRYPT:
-//             {
-//                 checkOutputBuffer(length, output, outputOffset);
-// 
-//                 lazyInit();
-// 
-//                 // If we have an overlap, we'll need to clone the input buffer before we potentially start overwriting
-//                 // it.
-//                 final byte[] finalBytes;
-//                 final int finalOffset;
-//                 if (Utils.arraysOverlap(bytes, offset, output, outputOffset, engineGetOutputSize(length))) {
-//                     finalBytes = Arrays.copyOfRange(bytes, offset, offset + length);
-//                     finalOffset = 0;
-//                 } else {
-//                     finalBytes = bytes;
-//                     finalOffset = offset;
-//                 }
-// 
-//                 return context.use(ptr->encryptUpdate(ptr, finalBytes, finalOffset, length, output, outputOffset));
-//             }
-//             default:
-//                 throw new IllegalStateException("Cipher not initialized");
-//         }
-//     }
