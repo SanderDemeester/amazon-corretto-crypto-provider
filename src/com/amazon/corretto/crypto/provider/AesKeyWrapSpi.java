@@ -31,11 +31,7 @@ import javax.crypto.spec.IvParameterSpec;
 
 /**
  * TODO [childw]
- * This class is the impl class for AES KeyWrap algorithms as defined in
- * <a href=https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-38F.pdf>
- * "Recommendation for Block Cipher Modes of Operation: Methods for Key Wrapping"
  */
-
 final class AesKeyWrapSpi extends CipherSpi {
     private static final int BLOCK_SIZE = 128 / 8;
 
@@ -53,6 +49,9 @@ final class AesKeyWrapSpi extends CipherSpi {
         this.provider = provider;
     }
 
+    private static native int wrapKey(long keyPtr, byte[] input, byte[] output);
+
+    private static native int unwrapKey(long keyPtr, byte[] input, byte[] output);
 
     @Override
     protected void engineSetMode(String mode) throws NoSuchAlgorithmException {
@@ -102,25 +101,6 @@ final class AesKeyWrapSpi extends CipherSpi {
         }
     }
 
-    // actual impl for various engineInit(...) methods
-    private void implInit(int opmode, Key key, byte[] iv, SecureRandom random)
-            throws InvalidKeyException, InvalidAlgorithmParameterException {
-        byte[] keyBytes = key.getEncoded();
-        if (keyBytes == null) {
-            throw new InvalidKeyException("Null key");
-        }
-        this.opmode = opmode;
-        boolean decrypting = opmode == Cipher.UNWRAP_MODE;
-        try {
-            // TODO [childw]
-            //cipher.init(decrypting, key.getAlgorithm(), keyBytes, iv);
-            //dataBuf = null;
-            //dataIdx = 0;
-        } finally {
-            Arrays.fill(keyBytes, (byte) 0);
-        }
-    }
-
     @Override
     protected void engineInit(int opmode, Key key, SecureRandom random)
         throws InvalidKeyException {
@@ -161,6 +141,22 @@ final class AesKeyWrapSpi extends CipherSpi {
             implInit(opmode, key, iv, random);
         } catch (IllegalArgumentException iae) {
             throw new InvalidAlgorithmParameterException(iae.getMessage());
+        }
+    }
+
+    // actual impl for various engineInit(...) methods
+    private void implInit(int opmode, Key key, byte[] iv, SecureRandom random)
+            throws InvalidKeyException, InvalidAlgorithmParameterException {
+        byte[] keyBytes = key.getEncoded();
+        if (keyBytes == null) {
+            throw new InvalidKeyException("Null key");
+        }
+        this.opmode = opmode;
+        boolean decrypting = opmode == Cipher.UNWRAP_MODE;
+        try {
+            // TODO [childw]
+        } finally {
+            Arrays.fill(keyBytes, (byte) 0);
         }
     }
 
