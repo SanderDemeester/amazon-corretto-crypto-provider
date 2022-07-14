@@ -155,6 +155,10 @@ final class AesKeyWrapSpi extends CipherSpi {
             if (!"AES".equalsIgnoreCase(key.getAlgorithm())) {
                 throw new InvalidKeyException("Expected an AES key");
             }
+            if (keyBytes != null) {
+                Arrays.fill(keyBytes, (byte) 0);
+                keyBytes = null;
+            }
             keyBytes = key.getEncoded();
             if (keyBytes == null) {
                 throw new InvalidKeyException("Key doesn't support encoding");
@@ -162,50 +166,40 @@ final class AesKeyWrapSpi extends CipherSpi {
             jceKey = (SecretKey) key;
         }
         this.opmode = opmode;
-        //boolean decrypting = opmode == Cipher.UNWRAP_MODE;
-        //try {
-            //// TODO [childw]
-        //} finally {
-            //Arrays.fill(keyBytes, (byte) 0);
-        //}
+        // TODO [childw] do something with |random| here?
     }
 
     @Override
     protected byte[] engineWrap(final Key key) throws IllegalBlockSizeException, InvalidKeyException {
-        if (opmode != Cipher.WRAP_MODE) {
-            throw new IllegalStateException("Cipher must be in WRAP_MODE");
+        if (opmode != Cipher.WRAP_MODE || keyBytes == null) {
+            throw new IllegalStateException("Cipher must be init'd in WRAP_MODE");
         }
-        // TODO [childw] native call to wrap
-        return null;
-        //try {
-            //final byte[] encoded = Utils.encodeForWrapping(provider, key);
-            //return engineDoFinal(encoded, 0, encoded.length);
+        try {
+            final byte[] encoded = Utils.encodeForWrapping(provider, key);
+            final byte[] wrappedKey = new byte[4096];
+            wrapKey(keyBytes, encoded, wrappedKey);
+            return wrappedKey;
+        } catch (final Exception ex) {
         //} catch (final BadPaddingException ex) {
-            //throw new InvalidKeyException("Wrapping failed", ex);
-        //}
+            throw new InvalidKeyException("Wrapping failed", ex);
+        }
     }
 
     @Override
     protected Key engineUnwrap(final byte[] wrappedKey, final String wrappedKeyAlgorithm, final int wrappedKeyType)
             throws InvalidKeyException, NoSuchAlgorithmException {
-        if (opmode != Cipher.UNWRAP_MODE) {
-            throw new IllegalStateException("Cipher must be in UNWRAP_MODE");
+        if (opmode != Cipher.UNWRAP_MODE || keyBytes == null) {
+            throw new IllegalStateException("Cipher must be init'd in WRAP_MODE");
         }
-        // TODO [childw] native call to unwrap
-        return null;
-        //try {
-            //final byte[] unwrappedKey = engineDoFinal(wrappedKey, 0, wrappedKey.length);
-            //return Utils.buildUnwrappedKey(provider, unwrappedKey, wrappedKeyAlgorithm, wrappedKeyType);
-        //} catch (final BadPaddingException | IllegalBlockSizeException | InvalidKeySpecException ex) {
-            //throw new InvalidKeyException("Unwrapping failed", ex);
-        //}
+        try {
+            final byte[] unwrappedKey = new byte[4096];
+            unwrapKey(keyBytes, wrappedKey, unwrappedKey);
+            return Utils.buildUnwrappedKey(provider, unwrappedKey, wrappedKeyAlgorithm, wrappedKeyType);
+        } catch (final Exception ex) {
+        //} catch (final BadPaddingException ex) {
+            throw new InvalidKeyException("Unwrapping failed", ex);
+        }
     }
-
-    //private static final class NativeContext extends NativeResource {
-    //    private NativeContext(final long ptr) {
-    //        super(ptr, AesKeyWrapSpi::releaseContext);
-    //    }
-    //}
 
     @Override
     protected byte[] engineUpdate(byte[] in, int inOffset, int inLen) {

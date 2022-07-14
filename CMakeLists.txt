@@ -558,7 +558,9 @@ add_jar(
     tests-code-jar
     SOURCES
         tst/com/amazon/corretto/crypto/provider/test/AccessibleByteArrayOutputStreamTest.java
+        tst/com/amazon/corretto/crypto/provider/test/AesGcmKatTest.java
         tst/com/amazon/corretto/crypto/provider/test/AESGenerativeTest.java
+        tst/com/amazon/corretto/crypto/provider/test/AesKeyWrapTest.java
         tst/com/amazon/corretto/crypto/provider/test/AesTest.java
         tst/com/amazon/corretto/crypto/provider/test/ConstantTimeTests.java
         tst/com/amazon/corretto/crypto/provider/test/EcGenTest.java
