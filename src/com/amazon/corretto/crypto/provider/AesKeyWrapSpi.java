@@ -177,10 +177,12 @@ final class AesKeyWrapSpi extends CipherSpi {
         try {
             final byte[] encoded = Utils.encodeForWrapping(provider, key);
             final byte[] wrappedKey = new byte[4096];
-            wrapKey(keyBytes, encoded, wrappedKey);
-            return wrappedKey;
+            int wrappedKeyLen = wrapKey(keyBytes, encoded, wrappedKey);
+            final byte[] wrappedKeyTruncated = new byte[wrappedKeyLen];
+            System.arraycopy(wrappedKey, 0, wrappedKeyTruncated, 0, wrappedKeyLen);
+            return wrappedKeyTruncated;
+        // TODO [childw] make this exception more specific, perhaps BadPaddingException?
         } catch (final Exception ex) {
-        //} catch (final BadPaddingException ex) {
             throw new InvalidKeyException("Wrapping failed", ex);
         }
     }
@@ -192,11 +194,13 @@ final class AesKeyWrapSpi extends CipherSpi {
             throw new IllegalStateException("Cipher must be init'd in WRAP_MODE");
         }
         try {
-            final byte[] unwrappedKey = new byte[4096];
-            unwrapKey(keyBytes, wrappedKey, unwrappedKey);
-            return Utils.buildUnwrappedKey(provider, unwrappedKey, wrappedKeyAlgorithm, wrappedKeyType);
+            final byte[] unwrappedKey = new byte[wrappedKey.length];
+            int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey);
+            final byte[] unwrappedKeyTruncated = new byte[unwrappedKeyLen];
+            System.arraycopy(unwrappedKey, 0, unwrappedKeyTruncated, 0, unwrappedKeyLen);
+            return Utils.buildUnwrappedKey(provider, unwrappedKeyTruncated, wrappedKeyAlgorithm, wrappedKeyType);
+        // TODO [childw] make this exception more specific, perhaps BadPaddingException?
         } catch (final Exception ex) {
-        //} catch (final BadPaddingException ex) {
             throw new InvalidKeyException("Unwrapping failed", ex);
         }
     }

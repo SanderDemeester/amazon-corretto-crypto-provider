@@ -70,6 +70,10 @@ This is equivalent to using a [GCMParameterSpec](https://docs.oracle.com/javase/
 By supporting the same ParameterSpec as other ciphers (such as `AES/CBC/PKCS5Padding`, which should not be used as it is no longer secure), ACCP makes it easier to migrate to the secure choice of `AES/GCM/NoPadding`.
 (This behavior is identical to how [BouncyCastle](https://bouncycastle.org/java.html) treats `IvParameterSpec` when used with AES-GCM.)
 
+## AES-KWP restricted support for IvParameterSpec
+
+TODO [childw]
+
 ## KeyAgreement supports reuse without reinitialization
 ACCP permits reuse of a [KeyAgreement](https://docs.oracle.com/javase/8/docs/api/javax/crypto/KeyAgreement.html) object without calling `.init()` more than once.
 This results in better performance for Static-Ephemeral key agreement protocols.

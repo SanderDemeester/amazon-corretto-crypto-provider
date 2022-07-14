@@ -47,22 +47,23 @@ public final class AesKeyWrapTest {
     @Test
     public void test() throws Exception {
         final SecureRandom sr = new SecureRandom();
-        byte[] keyBytes = "yellowsubmarine2".getBytes("UTF-8");
+        byte[] keyBytes = "yellowsubmarine1".getBytes("UTF-8");
         final SecretKey key = new SecretKeySpec(keyBytes, "AES");
 
-        byte[] secretBytes = "Yellowsubmarine1".getBytes("UTF-8");
-        final SecretKey secret = new SecretKeySpec(keyBytes, "AES");
+        byte[] secretBytes = "yellowsubmarine2".getBytes("UTF-8");
+        final SecretKey secret = new SecretKeySpec(secretBytes, "AES");
 
         Cipher c = Cipher.getInstance("AES/KWP/NoPadding", TestUtil.NATIVE_PROVIDER);
         c.init(Cipher.WRAP_MODE, key, sr);
         byte[] wrapped = c.wrap(secret);
         assertFalse(Arrays.equals(secretBytes, wrapped));
+        c = Cipher.getInstance("AES/KWP/NoPadding", TestUtil.NATIVE_PROVIDER);
         c.init(Cipher.UNWRAP_MODE, key, sr);
         Key unwrapped = c.unwrap(wrapped, "AES", Cipher.SECRET_KEY);
-        System.out.println("KEY:    " + Arrays.toString(key.getEncoded()));
-        System.out.println("SECRET: " + Arrays.toString(secret.getEncoded()));
-        System.out.println("WRAPPD: " + Arrays.toString(wrapped));
-        System.out.println("UNWRAP: " + Arrays.toString(unwrapped.getEncoded()));
+        //System.out.println("KEY:    " + Arrays.toString(key.getEncoded()));
+        //System.out.println("SECRET: " + Arrays.toString(secret.getEncoded()));
+        //System.out.println("WRAPPD: " + Arrays.toString(wrapped));
+        //System.out.println("UNWRAP: " + Arrays.toString(unwrapped.getEncoded()));
         assertTrue(Arrays.equals(secret.getEncoded(), unwrapped.getEncoded()));
         assertEquals(secret, unwrapped);
     }

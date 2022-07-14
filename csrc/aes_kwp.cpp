@@ -32,7 +32,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wra
 
         AES_KEY aes_key;
         SecureBuffer<uint8_t, 32> keybuf;
-        input.get_bytes(env, keybuf.buf, 0, key.len());
+        key.get_bytes(env, keybuf.buf, 0, key.len());
         if (AES_set_encrypt_key(keybuf.buf, key.len()*8, &aes_key) != 0) {
             throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
         }
@@ -43,11 +43,12 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wra
         input.get_bytes(env, inbuf.buf, 0, input.len());
         SecureBuffer<uint8_t, 4096> outbuf;
         size_t outlen;
-        AES_wrap_key_padded(&aes_key, outbuf.buf, &outlen, sizeof(outbuf.buf),
-                inbuf.buf, input.len());
+        if (!AES_wrap_key_padded(&aes_key, outbuf.buf, &outlen, sizeof(outbuf.buf), inbuf.buf, input.len())) {
+            throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "Error wrapping key");
+        }
         output.put_bytes(env, outbuf.buf, 0, outlen);
 
-        return 1;
+        return outlen;
     } catch (java_ex &ex) {
         ex.throw_to_java(pEnv);
         return 0;
@@ -71,7 +72,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
 
         AES_KEY aes_key;
         SecureBuffer<uint8_t, 32> keybuf;
-        input.get_bytes(env, keybuf.buf, 0, key.len());
+        key.get_bytes(env, keybuf.buf, 0, key.len());
         if (AES_set_decrypt_key(keybuf.buf, key.len()*8, &aes_key) != 0) {
             throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
         }
@@ -82,11 +83,12 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
         input.get_bytes(env, inbuf.buf, 0, input.len());
         SecureBuffer<uint8_t, 4096> outbuf;
         size_t outlen;
-        AES_unwrap_key_padded(&aes_key, outbuf.buf, &outlen, sizeof(outbuf.buf),
-                inbuf.buf, input.len());
+        if (!AES_unwrap_key_padded(&aes_key, outbuf.buf, &outlen, input.len(), inbuf.buf, input.len())) {
+            throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "Error unwrapping key");
+        }
         output.put_bytes(env, outbuf.buf, 0, outlen);
 
-        return 1;
+        return outlen;
     } catch (java_ex &ex) {
         ex.throw_to_java(pEnv);
         return 0;
