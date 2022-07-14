@@ -42,7 +42,7 @@ final class AesKeyWrapSpi extends CipherSpi {
     private final AmazonCorrettoCryptoProvider provider;
     private NativeResource context = null;
     private SecretKey jceKey;
-    private byte[] key;
+    private byte[] keyBytes;
     private int opmode = -1;    // must be set by init(..)
 
     AesKeyWrapSpi(final AmazonCorrettoCryptoProvider provider) {
@@ -50,9 +50,9 @@ final class AesKeyWrapSpi extends CipherSpi {
         this.provider = provider;
     }
 
-    private static native int wrapKey(long keyPtr, byte[] input, byte[] output);
+    private static native int wrapKey(byte[] key, byte[] input, byte[] output);
 
-    private static native int unwrapKey(long keyPtr, byte[] input, byte[] output);
+    private static native int unwrapKey(byte[] key, byte[] input, byte[] output);
 
     @Override
     protected void engineSetMode(String mode) throws NoSuchAlgorithmException {
@@ -139,20 +139,35 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     private void implInit(int opmode, Key key, SecureRandom random)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
-        byte[] keyBytes = key.getEncoded();
-        if (keyBytes == null) {
-            throw new InvalidKeyException("Null key");
-        }
         if (opmode != Cipher.UNWRAP_MODE && opmode != Cipher.WRAP_MODE) {
             throw new UnsupportedOperationException("Cipher only supports un/wrap modes");
         }
-        this.opmode = opmode;
-        boolean decrypting = opmode == Cipher.UNWRAP_MODE;
-        try {
-            // TODO [childw]
-        } finally {
-            Arrays.fill(keyBytes, (byte) 0);
+        if (key == null) {
+            throw new InvalidKeyException("Null key");
         }
+        if (key != jceKey) {
+            if (!(key instanceof  SecretKey)) {
+                throw new InvalidKeyException("Need a SecretKey");
+            }
+            if (!"RAW".equalsIgnoreCase(key.getFormat())) {
+                throw new InvalidKeyException("Need a raw format key");
+            }
+            if (!"AES".equalsIgnoreCase(key.getAlgorithm())) {
+                throw new InvalidKeyException("Expected an AES key");
+            }
+            keyBytes = key.getEncoded();
+            if (keyBytes == null) {
+                throw new InvalidKeyException("Key doesn't support encoding");
+            }
+            jceKey = (SecretKey) key;
+        }
+        this.opmode = opmode;
+        //boolean decrypting = opmode == Cipher.UNWRAP_MODE;
+        //try {
+            //// TODO [childw]
+        //} finally {
+            //Arrays.fill(keyBytes, (byte) 0);
+        //}
     }
 
     @Override
