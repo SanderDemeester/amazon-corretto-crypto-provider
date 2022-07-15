@@ -42,14 +42,14 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wra
             throw_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
         }
 
-        SecureBuffer<uint8_t, 8192> inbuf;
-        input.get_bytes(env, inbuf.buf, 0, input.len());
-        SecureBuffer<uint8_t, 8192> outbuf;
+        jni_borrow inbuf(env, input, "input");
+        input.get_bytes(env, inbuf.data(), 0, input.len());
+        jni_borrow outbuf(env, output, "output");
         size_t outlen;
-        if (!AES_wrap_key_padded(&aes_key, outbuf.buf, &outlen, sizeof(outbuf.buf), inbuf.buf, input.len())) {
+        if (!AES_wrap_key_padded(&aes_key, outbuf.data(), &outlen, outbuf.len(), inbuf.data(), input.len())) {
             throw_openssl(EX_RUNTIME_CRYPTO, "Error wrapping key");
         }
-        output.put_bytes(env, outbuf.buf, 0, outlen);
+        output.put_bytes(env, outbuf.data(), 0, outlen);
 
         return outlen;
     } catch (java_ex &ex) {
@@ -85,16 +85,16 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
             throw_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
         }
 
-        SecureBuffer<uint8_t, 8192> inbuf;
-        input.get_bytes(env, inbuf.buf, 0, input.len());
-        SecureBuffer<uint8_t, 8192> outbuf;
+        jni_borrow inbuf(env, input, "input");
+        input.get_bytes(env, inbuf.data(), 0, input.len());
+        jni_borrow outbuf(env, output, "output");
         size_t outlen;
-        if (!AES_unwrap_key_padded(&aes_key, outbuf.buf, &outlen, input.len(), inbuf.buf, input.len())) {
+        if (!AES_unwrap_key_padded(&aes_key, outbuf.data(), &outlen, input.len(), inbuf.data(), input.len())) {
             throw_openssl(EX_RUNTIME_CRYPTO, "Error unwrapping key");
         }
-        output.put_bytes(env, outbuf.buf, 0, output.len());
+        output.put_bytes(env, outbuf.data(), 0, output.len());
         if (outlen > output.len()) {
-            extra.put_bytes(env, (&outbuf.buf[0])+output.len(), 0, outlen - output.len());
+            extra.put_bytes(env, (&(outbuf.data()[0]))+output.len(), 0, outlen - output.len());
         }
 
         return outlen;
