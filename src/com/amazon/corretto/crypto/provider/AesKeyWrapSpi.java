@@ -52,7 +52,7 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     private static native int wrapKey(byte[] key, byte[] input, byte[] output);
 
-    private static native int unwrapKey(byte[] key, byte[] input, byte[] output);
+    private static native int unwrapKey(byte[] key, byte[] input, byte[] output, byte[] extra);
 
     @Override
     protected void engineSetMode(String mode) throws NoSuchAlgorithmException {
@@ -120,8 +120,8 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (params != null) {
             try {
                 paramSpec = params.getParameterSpec(IvParameterSpec.class);
-            } catch (InvalidParameterSpecException ispe) {
-                throw new InvalidAlgorithmParameterException("Only IvParameterSpec is accepted");
+            } catch (InvalidParameterSpecException e) {
+                throw new InvalidAlgorithmParameterException("Only IvParameterSpec is accepted", e);
             }
         }
         engineInit(opmode, key, paramSpec, random);
@@ -131,13 +131,13 @@ final class AesKeyWrapSpi extends CipherSpi {
     protected void engineInit(int opmode, Key key, AlgorithmParameterSpec params, SecureRandom random)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
         if (params != null && !(params instanceof IvParameterSpec)
-                && !Arrays.equals(ICV2, ((IvParameterSpec) params).getIV())) {
+                && !MessageDigest.isEqual(ICV2, ((IvParameterSpec) params).getIV())) {
             throw new InvalidAlgorithmParameterException("Only ICV2 IvParameterSpec is accepted");
         }
         implInit(opmode, key, random);
     }
 
-    private void implInit(int opmode, Key key, SecureRandom random)
+    private void implInit(int opmode, Key key, SecureRandom ignored)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
         if (opmode != Cipher.UNWRAP_MODE && opmode != Cipher.WRAP_MODE) {
             throw new UnsupportedOperationException("Cipher only supports un/wrap modes");
@@ -166,7 +166,6 @@ final class AesKeyWrapSpi extends CipherSpi {
             jceKey = (SecretKey) key;
         }
         this.opmode = opmode;
-        // TODO [childw] do something with |random| here?
     }
 
     @Override
@@ -174,16 +173,21 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (opmode != Cipher.WRAP_MODE || keyBytes == null) {
             throw new IllegalStateException("Cipher must be init'd in WRAP_MODE");
         }
+        byte[] encoded = null;
         try {
-            final byte[] encoded = Utils.encodeForWrapping(provider, key);
-            final byte[] wrappedKey = new byte[4096];
+            encoded = Utils.encodeForWrapping(provider, key);
+            final int paddingLen = encoded.length % 8 == 0 ? 0 : (8 - (encoded.length % 8));
+            final int expectedWrappedLen = encoded.length + paddingLen + 8;
+            final byte[] wrappedKey = new byte[expectedWrappedLen];
             int wrappedKeyLen = wrapKey(keyBytes, encoded, wrappedKey);
-            final byte[] wrappedKeyTruncated = new byte[wrappedKeyLen];
-            System.arraycopy(wrappedKey, 0, wrappedKeyTruncated, 0, wrappedKeyLen);
-            return wrappedKeyTruncated;
-        // TODO [childw] make this exception more specific, perhaps BadPaddingException?
+            // TODO [childw] throw an ecxeption if our expectation was off?
+            return wrappedKey;
         } catch (final Exception ex) {
             throw new InvalidKeyException("Wrapping failed", ex);
+        } finally {
+            if (encoded != null) {
+                Arrays.fill(encoded, (byte) 0);
+            }
         }
     }
 
@@ -191,17 +195,28 @@ final class AesKeyWrapSpi extends CipherSpi {
     protected Key engineUnwrap(final byte[] wrappedKey, final String wrappedKeyAlgorithm, final int wrappedKeyType)
             throws InvalidKeyException, NoSuchAlgorithmException {
         if (opmode != Cipher.UNWRAP_MODE || keyBytes == null) {
-            throw new IllegalStateException("Cipher must be init'd in WRAP_MODE");
+            throw new IllegalStateException("Cipher must be init'd in UNWRAP_MODE");
         }
+        byte[] unwrappedKey = new byte[wrappedKey.length - 8];
+        final byte[] extra = new byte[8];
         try {
-            final byte[] unwrappedKey = new byte[wrappedKey.length];
-            int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey);
-            final byte[] unwrappedKeyTruncated = new byte[unwrappedKeyLen];
-            System.arraycopy(unwrappedKey, 0, unwrappedKeyTruncated, 0, unwrappedKeyLen);
-            return Utils.buildUnwrappedKey(provider, unwrappedKeyTruncated, wrappedKeyAlgorithm, wrappedKeyType);
-        // TODO [childw] make this exception more specific, perhaps BadPaddingException?
+            int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey, extra);
+            // TODO [childw] explanatory comment
+            if (unwrappedKeyLen != unwrappedKey.length) {
+                final byte[] tmp = new byte[unwrappedKeyLen];
+                System.arraycopy(unwrappedKey, 0, tmp, 0, Math.min(unwrappedKey.length, unwrappedKeyLen));
+                if (unwrappedKeyLen > unwrappedKey.length) {
+                    System.arraycopy(extra, 0, tmp, unwrappedKey.length, unwrappedKeyLen - unwrappedKey.length);
+                }
+                Arrays.fill(unwrappedKey, (byte) 0);
+                unwrappedKey = tmp;
+            }
+            return Utils.buildUnwrappedKey(provider, unwrappedKey, wrappedKeyAlgorithm, wrappedKeyType);
         } catch (final Exception ex) {
             throw new InvalidKeyException("Unwrapping failed", ex);
+        } finally {
+            Arrays.fill(unwrappedKey, (byte) 0);
+            Arrays.fill(extra, (byte) 0);
         }
     }
 

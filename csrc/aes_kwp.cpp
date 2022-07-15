@@ -13,6 +13,8 @@
 #include "buffer.h"
 #include "keyutils.h"
 
+#define AES_MAX_KEY_SIZE 32
+
 using namespace AmazonCorrettoCryptoProvider;
 
 JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wrapKey(
@@ -31,20 +33,21 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wra
         java_buffer output = java_buffer::from_array(env, outputArray);
 
         AES_KEY aes_key;
-        SecureBuffer<uint8_t, 32> keybuf;
+        SecureBuffer<uint8_t, AES_MAX_KEY_SIZE> keybuf;
+        if (key.len() > sizeof(keybuf.buf)) {
+            throw_openssl(EX_RUNTIME_CRYPTO, "AES key too large");
+        }
         key.get_bytes(env, keybuf.buf, 0, key.len());
         if (AES_set_encrypt_key(keybuf.buf, key.len()*8, &aes_key) != 0) {
-            throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
+            throw_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
         }
 
-        // TODO [childw] smaller more precise size
-        // TODO [childw] try to eliminate extra copies.
-        SecureBuffer<uint8_t, 4096> inbuf;
+        SecureBuffer<uint8_t, 8192> inbuf;
         input.get_bytes(env, inbuf.buf, 0, input.len());
-        SecureBuffer<uint8_t, 4096> outbuf;
+        SecureBuffer<uint8_t, 8192> outbuf;
         size_t outlen;
         if (!AES_wrap_key_padded(&aes_key, outbuf.buf, &outlen, sizeof(outbuf.buf), inbuf.buf, input.len())) {
-            throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "Error wrapping key");
+            throw_openssl(EX_RUNTIME_CRYPTO, "Error wrapping key");
         }
         output.put_bytes(env, outbuf.buf, 0, outlen);
 
@@ -60,7 +63,8 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
   jclass,
   jbyteArray keyArray,
   jbyteArray inputArray,
-  jbyteArray outputArray
+  jbyteArray outputArray,
+  jbyteArray extraArray
 )
 {
     try {
@@ -69,24 +73,29 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
         java_buffer key = java_buffer::from_array(env, keyArray);
         java_buffer input = java_buffer::from_array(env, inputArray);
         java_buffer output = java_buffer::from_array(env, outputArray);
+        java_buffer extra = java_buffer::from_array(env, extraArray);
 
         AES_KEY aes_key;
-        SecureBuffer<uint8_t, 32> keybuf;
+        SecureBuffer<uint8_t, AES_MAX_KEY_SIZE> keybuf;
+        if (key.len() > sizeof(keybuf.buf)) {
+            throw_openssl(EX_RUNTIME_CRYPTO, "AES key too large");
+        }
         key.get_bytes(env, keybuf.buf, 0, key.len());
         if (AES_set_decrypt_key(keybuf.buf, key.len()*8, &aes_key) != 0) {
-            throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
+            throw_openssl(EX_RUNTIME_CRYPTO, "AES key init failed");
         }
 
-        // TODO [childw] smaller more precise size
-        // TODO [childw] try to eliminate extra copies.
-        SecureBuffer<uint8_t, 4096> inbuf;
+        SecureBuffer<uint8_t, 8192> inbuf;
         input.get_bytes(env, inbuf.buf, 0, input.len());
-        SecureBuffer<uint8_t, 4096> outbuf;
+        SecureBuffer<uint8_t, 8192> outbuf;
         size_t outlen;
         if (!AES_unwrap_key_padded(&aes_key, outbuf.buf, &outlen, input.len(), inbuf.buf, input.len())) {
-            throw java_ex::from_openssl(EX_RUNTIME_CRYPTO, "Error unwrapping key");
+            throw_openssl(EX_RUNTIME_CRYPTO, "Error unwrapping key");
         }
-        output.put_bytes(env, outbuf.buf, 0, outlen);
+        output.put_bytes(env, outbuf.buf, 0, output.len());
+        if (outlen > output.len()) {
+            extra.put_bytes(env, (&outbuf.buf[0])+output.len(), 0, outlen - output.len());
+        }
 
         return outlen;
     } catch (java_ex &ex) {

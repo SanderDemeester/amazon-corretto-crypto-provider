@@ -15,7 +15,9 @@ import java.security.InvalidKeyException;
 import java.security.Key;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.stream.Stream;
@@ -37,6 +39,7 @@ import org.junit.jupiter.api.parallel.ResourceAccessMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 @ExtendWith(TestResultLogger.class)
@@ -44,13 +47,33 @@ import org.junit.jupiter.params.provider.MethodSource;
 @ResourceLock(value = TestUtil.RESOURCE_GLOBAL, mode = ResourceAccessMode.READ)
 public final class AesKeyWrapTest {
 
-    @Test
-    public void test() throws Exception {
+    public static List<Arguments> sizes() {
+        final int[] keySizes = {16, 24, 32};
+        final int[] secretSizes = {
+            8,                      // https://datatracker.ietf.org/doc/html/rfc5649#section-4.1
+            16, 24, 32,             // AES keys
+            512, 1024, 2048, 4096,  // RSA keys
+            123, 900, 81, 99, 37,   // weird sizes to exercise padding logic
+        };
+        List<Arguments> args = new ArrayList<>();
+        for (int keySize : keySizes) {
+            for (int secretSize : secretSizes) {
+                args.add(Arguments.of(keySize, secretSize));
+            }
+        }
+        return args;
+    }
+
+    @ParameterizedTest
+    @MethodSource("sizes")
+    public void roundtrip(int keySize, int secretSize) throws Exception {
         final SecureRandom sr = new SecureRandom();
-        byte[] keyBytes = "yellowsubmarine1".getBytes("UTF-8");
+        byte[] keyBytes = new byte[keySize];
+        sr.nextBytes(keyBytes);
         final SecretKey key = new SecretKeySpec(keyBytes, "AES");
 
-        byte[] secretBytes = "yellowsubmarine2".getBytes("UTF-8");
+        byte[] secretBytes = new byte[secretSize];
+        sr.nextBytes(secretBytes);
         final SecretKey secret = new SecretKeySpec(secretBytes, "AES");
 
         Cipher c = Cipher.getInstance("AES/KWP/NoPadding", TestUtil.NATIVE_PROVIDER);
