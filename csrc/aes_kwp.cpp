@@ -83,8 +83,8 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
 
         jni_borrow inbuf(env, input, "input");
         jni_borrow outbuf(env, output, "output");
-        size_t outlen;
-        if (!AES_unwrap_key_padded(&aes_key, outbuf.data(), &outlen, input.len(), inbuf.data(), input.len())) {
+        size_t outlen = 0;
+        if (!AES_unwrap_key_padded(&aes_key, outbuf.data(), &outlen, outbuf.len(), inbuf.data(), inbuf.len())) {
             throw_openssl(EX_RUNTIME_CRYPTO, "Error unwrapping key");
         }
 
