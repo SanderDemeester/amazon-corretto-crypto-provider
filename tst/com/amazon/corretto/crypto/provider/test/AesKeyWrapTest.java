@@ -48,17 +48,19 @@ import org.junit.jupiter.params.provider.MethodSource;
 public final class AesKeyWrapTest {
 
     public static List<Arguments> sizes() {
-        final int[] keySizes = {16, 24, 32};
+        final int[] aeskeySizes = {16, 24, 32};
         final int[] secretSizes = {
-            8,                      // https://datatracker.ietf.org/doc/html/rfc5649#section-4.1
-            16, 24, 32,             // AES keys
-            512, 1024, 2048, 4096,  // RSA keys
-            123, 900, 81, 99, 37,   // weird sizes to exercise padding logic
+            8,                          // https://datatracker.ietf.org/doc/html/rfc5649#section-4.1
+            16, 24, 32,                 // AES keys
+            512, 1024, 2048, 4096,      // RSA keys
+            4, 123, 900, 81, 99, 37,    // weird sizes to exercise padding logic
         };
         List<Arguments> args = new ArrayList<>();
-        for (int keySize : keySizes) {
+        for (int aeskeySize : aeskeySizes) {
             for (int secretSize : secretSizes) {
-                args.add(Arguments.of(keySize, secretSize));
+                args.add(Arguments.of(aeskeySize, secretSize > 0 ? secretSize-1 : secretSize));
+                args.add(Arguments.of(aeskeySize, secretSize));
+                args.add(Arguments.of(aeskeySize, secretSize+1));
             }
         }
         return args;
@@ -66,23 +68,22 @@ public final class AesKeyWrapTest {
 
     @ParameterizedTest
     @MethodSource("sizes")
-    public void roundtrip(int keySize, int secretSize) throws Exception {
+    public void roundtrip(int aeskeySize, int secretSize) throws Exception {
         final SecureRandom sr = new SecureRandom();
-        byte[] keyBytes = new byte[keySize];
+        byte[] keyBytes = new byte[aeskeySize];
         sr.nextBytes(keyBytes);
         final SecretKey key = new SecretKeySpec(keyBytes, "AES");
 
         byte[] secretBytes = new byte[secretSize];
         sr.nextBytes(secretBytes);
-        final SecretKey secret = new SecretKeySpec(secretBytes, "AES");
+        final SecretKey secret = new SecretKeySpec(secretBytes, "Generic");
 
         Cipher c = Cipher.getInstance("AES/KWP/NoPadding", TestUtil.NATIVE_PROVIDER);
         c.init(Cipher.WRAP_MODE, key, sr);
         byte[] wrapped = c.wrap(secret);
         assertFalse(Arrays.equals(secretBytes, wrapped));
-        c = Cipher.getInstance("AES/KWP/NoPadding", TestUtil.NATIVE_PROVIDER);
         c.init(Cipher.UNWRAP_MODE, key, sr);
-        Key unwrapped = c.unwrap(wrapped, "AES", Cipher.SECRET_KEY);
+        Key unwrapped = c.unwrap(wrapped, "Generic", Cipher.SECRET_KEY);
         //System.out.println("KEY:    " + Arrays.toString(key.getEncoded()));
         //System.out.println("SECRET: " + Arrays.toString(secret.getEncoded()));
         //System.out.println("WRAPPD: " + Arrays.toString(wrapped));
