@@ -197,12 +197,15 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (opmode != Cipher.UNWRAP_MODE || keyBytes == null) {
             throw new IllegalStateException("Cipher must be init'd in UNWRAP_MODE");
         }
-        byte[] unwrappedKey = new byte[wrappedKey.length];
+        // TODO [childw] note about >= 8 bytes of padding, optimality of
+        //               8-byte-block-aligned keys as common case.
+        byte[] unwrappedKey = new byte[wrappedKey.length-8];
         try {
             int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey);
-            // TODO [childw] explanatory comment, note about potential
-            // optimization to extra allocation and copy in common case of
-            // block-aligned unwrapped key size.
+            // If we overestimated the size of the unwrapped key, we need to
+            // copy only the key's bytes over to a newer, smaller byte array.
+            // Java's inability to truncate arrays after creation forces us to
+            // do this.
             if (unwrappedKeyLen < unwrappedKey.length) {
                 final byte[] tmp = new byte[unwrappedKeyLen];
                 System.arraycopy(unwrappedKey, 0, tmp, 0, unwrappedKeyLen);
