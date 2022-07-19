@@ -61,8 +61,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
   jclass,
   jbyteArray keyArray,
   jbyteArray inputArray,
-  jbyteArray outputArray,
-  jbyteArray extraArray
+  jbyteArray outputArray
 )
 {
     try {
@@ -71,7 +70,6 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
         java_buffer key = java_buffer::from_array(env, keyArray);
         java_buffer input = java_buffer::from_array(env, inputArray);
         java_buffer output = java_buffer::from_array(env, outputArray);
-        java_buffer extra = java_buffer::from_array(env, extraArray);
 
         AES_KEY aes_key;
         SecureBuffer<uint8_t, AES_MAX_KEY_SIZE> keybuf;
@@ -88,9 +86,6 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
         size_t outlen;
         if (!AES_unwrap_key_padded(&aes_key, outbuf.data(), &outlen, input.len(), inbuf.data(), input.len())) {
             throw_openssl(EX_RUNTIME_CRYPTO, "Error unwrapping key");
-        }
-        if (outlen > output.len()) {
-            extra.put_bytes(env, (&(outbuf.data()[0]))+output.len(), 0, outlen - output.len());
         }
 
         return outlen;

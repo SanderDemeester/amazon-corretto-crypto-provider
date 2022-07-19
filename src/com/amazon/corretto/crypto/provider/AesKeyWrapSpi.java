@@ -52,7 +52,7 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     private static native int wrapKey(byte[] key, byte[] input, byte[] output);
 
-    private static native int unwrapKey(byte[] key, byte[] input, byte[] output, byte[] extra);
+    private static native int unwrapKey(byte[] key, byte[] input, byte[] output);
 
     @Override
     protected void engineSetMode(String mode) throws NoSuchAlgorithmException {
@@ -197,17 +197,15 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (opmode != Cipher.UNWRAP_MODE || keyBytes == null) {
             throw new IllegalStateException("Cipher must be init'd in UNWRAP_MODE");
         }
-        byte[] unwrappedKey = new byte[wrappedKey.length - 8];
-        final byte[] extra = new byte[8];
+        byte[] unwrappedKey = new byte[wrappedKey.length];
         try {
-            int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey, extra);
-            // TODO [childw] explanatory comment
-            if (unwrappedKeyLen != unwrappedKey.length) {
+            int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey);
+            // TODO [childw] explanatory comment, note about potential
+            // optimization to extra allocation and copy in common case of
+            // block-aligned unwrapped key size.
+            if (unwrappedKeyLen < unwrappedKey.length) {
                 final byte[] tmp = new byte[unwrappedKeyLen];
-                System.arraycopy(unwrappedKey, 0, tmp, 0, Math.min(unwrappedKey.length, unwrappedKeyLen));
-                if (unwrappedKeyLen > unwrappedKey.length) {
-                    System.arraycopy(extra, 0, tmp, unwrappedKey.length, unwrappedKeyLen - unwrappedKey.length);
-                }
+                System.arraycopy(unwrappedKey, 0, tmp, 0, unwrappedKeyLen);
                 Arrays.fill(unwrappedKey, (byte) 0);
                 unwrappedKey = tmp;
             }
@@ -216,7 +214,6 @@ final class AesKeyWrapSpi extends CipherSpi {
             throw new InvalidKeyException("Unwrapping failed", ex);
         } finally {
             Arrays.fill(unwrappedKey, (byte) 0);
-            Arrays.fill(extra, (byte) 0);
         }
     }
 
