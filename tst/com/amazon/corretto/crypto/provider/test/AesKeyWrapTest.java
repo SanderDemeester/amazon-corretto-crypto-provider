@@ -1,44 +1,34 @@
 package com.amazon.corretto.crypto.provider.test;
 
+import static com.amazon.corretto.crypto.provider.test.TestUtil.assertArraysHexEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.security.GeneralSecurityException;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
 import java.security.Key;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.Provider;
 import java.security.SecureRandom;
-import java.util.Arrays;
+import java.security.spec.ECGenParameterSpec;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Spliterator;
-import java.util.Spliterators;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
-import java.util.zip.GZIPInputStream;
 
-import javax.crypto.AEADBadTagException;
-import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
-import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.api.parallel.ResourceAccessMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -47,15 +37,15 @@ import org.junit.jupiter.params.provider.MethodSource;
 @Execution(ExecutionMode.CONCURRENT)
 @ResourceLock(value = TestUtil.RESOURCE_GLOBAL, mode = ResourceAccessMode.READ)
 public final class AesKeyWrapTest {
-    // TODO [childw] any other aliases in BC or JCE that we need to check?
     private static final List<String> KWP_CIPHER_ALIASES = Arrays.asList(
             "AESWRAPPAD",
+            "AesWrapPad",
             "AES/KWP/NoPadding"
     );
 
-    // TODO [childw] provide more descriptive names
-    public static List<Arguments> sizes() {
-        final int[] aesKeySizes = {16, 24, 32};
+    private static final List<Integer> AES_KEY_SIZES = Arrays.asList(16, 24, 32);
+
+    public static List<Arguments> getParamsGeneric() {
         final int[] secretSizes = {
             8,                          // https://datatracker.ietf.org/doc/html/rfc5649#section-4.1
             16, 24, 32,                 // AES keys
@@ -63,75 +53,178 @@ public final class AesKeyWrapTest {
             4, 123, 900, 81, 99, 37,    // weird sizes to exercise padding logic
         };
         List<Arguments> args = new ArrayList<>();
-        for (int aesKeySize : aesKeySizes) {
+        for (int wrappingKeySize : AES_KEY_SIZES) {
             for (int secretSize : secretSizes) {
-                args.add(Arguments.of(aesKeySize, secretSize > 0 ? secretSize-1 : secretSize));
-                args.add(Arguments.of(aesKeySize, secretSize));
-                args.add(Arguments.of(aesKeySize, secretSize+1));
+                args.add(Arguments.of(wrappingKeySize, secretSize-1));
+                args.add(Arguments.of(wrappingKeySize, secretSize));
+                args.add(Arguments.of(wrappingKeySize, secretSize+1));
             }
         }
         return args;
     }
 
-    @ParameterizedTest
-    @MethodSource("sizes")
-    public void roundtripNativeSameCipher(int aesKeySize, int secretSize) throws Exception {
-        roundtrip(aesKeySize, secretSize, TestUtil.NATIVE_PROVIDER, null, true);
-    }
+    private void roundtripGeneric(int wrappingKeySize, int secretSize, Provider wrappingProvider, Provider unwrappingProvider, boolean reuseCipher) throws Exception {
+        final SecureRandom ignored = null;
+        final SecretKey wrappingKey = getAesKey(wrappingKeySize);
 
-    @ParameterizedTest
-    @MethodSource("sizes")
-    public void roundtripNativeNewCipher(int aesKeySize, int secretSize) throws Exception {
-        roundtrip(aesKeySize, secretSize, TestUtil.NATIVE_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
-    }
-
-    @ParameterizedTest
-    @MethodSource("sizes")
-    public void roundtripNative2BC(int aesKeySize, int secretSize) throws Exception {
-        roundtrip(aesKeySize, secretSize, TestUtil.NATIVE_PROVIDER, TestUtil.BC_PROVIDER, false);
-    }
-
-    @ParameterizedTest
-    @MethodSource("sizes")
-    public void roundtripBC2native(int aesKeySize, int secretSize) throws Exception {
-        roundtrip(aesKeySize, secretSize, TestUtil.BC_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
-    }
-
-    // TODO [childw] add new compatibility test cases for JCE providers that skip if < Java17
-    // TODO [childw] add parameter for SecretKey type, parameterize that out across EC, RSA, etc.
-    //               bonus points if we can auto-detect valid key sizes and filter the overarching
-    //               secret key parameter sizes into these parameterized tests for particular key sizes.
-    private void roundtrip(int aesKeySize, int secretSize, Provider wrappingProvider, Provider unwrappingProvider, boolean reuseCipher) throws Exception {
-        final SecureRandom sr = new SecureRandom();
-        byte[] keyBytes = new byte[aesKeySize];
-        sr.nextBytes(keyBytes);
-        final SecretKey key = new SecretKeySpec(keyBytes, "AES");
-
-        byte[] secretBytes = new byte[secretSize];
-        sr.nextBytes(secretBytes);
+        byte[] secretBytes = TestUtil.getRandomBytes(secretSize);
         final SecretKey secret = new SecretKeySpec(secretBytes, "Generic");
 
         Cipher c = getCipher(wrappingProvider);
-        c.init(Cipher.WRAP_MODE, key, sr);
-        byte[] wrapped = c.wrap(secret);
-        assertFalse(Arrays.equals(secretBytes, wrapped));
+        c.init(Cipher.WRAP_MODE, wrappingKey, ignored);
+        byte[] wrappedKey = c.wrap(secret);
+        assertFalse(Arrays.equals(secretBytes, wrappedKey));
         if (!reuseCipher) {
             c = getCipher(unwrappingProvider);
         } else {
             assertTrue(unwrappingProvider == null);
         }
-        c.init(Cipher.UNWRAP_MODE, key, sr);
-        Key unwrapped = c.unwrap(wrapped, "Generic", Cipher.SECRET_KEY);
-        assertTrue(Arrays.equals(secret.getEncoded(), unwrapped.getEncoded()));
-        assertEquals(secret, unwrapped);
+        c.init(Cipher.UNWRAP_MODE, wrappingKey, ignored);
+        final int mode;
+        Key unwrappedKey = c.unwrap(wrappedKey, "Generic", Cipher.SECRET_KEY);
+        assertArraysHexEquals(secret.getEncoded(), unwrappedKey.getEncoded());
+        assertEquals(secret, unwrappedKey);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsGeneric")
+    public void roundtripNativeSameCipherGeneric(int wrappingKeySize, int secretSize) throws Exception {
+        roundtripGeneric(wrappingKeySize, secretSize, TestUtil.NATIVE_PROVIDER, null, true);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsGeneric")
+    public void roundtripNativeNewCipherGeneric(int wrappingKeySize, int secretSize) throws Exception {
+        roundtripGeneric(wrappingKeySize, secretSize, TestUtil.NATIVE_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsGeneric")
+    public void roundtripNative2BCGeneric(int wrappingKeySize, int secretSize) throws Exception {
+        roundtripGeneric(wrappingKeySize, secretSize, TestUtil.NATIVE_PROVIDER, TestUtil.BC_PROVIDER, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsGeneric")
+    public void roundtripBC2nativeGeneric(int wrappingKeySize, int secretSize) throws Exception {
+        roundtripGeneric(wrappingKeySize, secretSize, TestUtil.BC_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsGeneric")
+    public void roundtripNative2JCEGeneric(int wrappingKeySize, int secretSize) throws Exception {
+        TestUtil.assumeMinimumJavaVersion(17);  // KWP added to JCE in 17 https://bugs.openjdk.org/browse/JDK-8248268
+        roundtripGeneric(wrappingKeySize, secretSize, TestUtil.NATIVE_PROVIDER, null, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsGeneric")
+    public void roundtripJCE2nativeGeneric(int wrappingKeySize, int secretSize) throws Exception {
+        TestUtil.assumeMinimumJavaVersion(17);  // KWP added to JCE in 17 https://bugs.openjdk.org/browse/JDK-8248268
+        roundtripGeneric(wrappingKeySize, secretSize, null, TestUtil.NATIVE_PROVIDER, false);
+    }
+
+    public static List<Arguments> getParamsAsymmetric() throws GeneralSecurityException {
+        final String[] ecCurveNames = {"secp224r1", "secp256r1", "secp384r1", "secp521r1"};
+        final int[] rsaKeySizes = {512, 1024, 2048, 4096};
+        List<Arguments> args = new ArrayList<>();
+        KeyPairGenerator kpg;
+        for (int wrappingKeySize : AES_KEY_SIZES) {
+            kpg = KeyPairGenerator.getInstance("EC", TestUtil.NATIVE_PROVIDER);
+            for (String curve : ecCurveNames) {
+                kpg.initialize(new ECGenParameterSpec(curve));
+                String display = String.format("EC(%s)", curve);
+                args.add(Arguments.of(wrappingKeySize, kpg.generateKeyPair(), display));
+            }
+            kpg = KeyPairGenerator.getInstance("RSA", TestUtil.NATIVE_PROVIDER);
+            for (int bits : rsaKeySizes) {
+                kpg.initialize(bits);
+                String display = String.format("RSA(%d)", bits);
+                args.add(Arguments.of(wrappingKeySize, kpg.generateKeyPair(), display));
+            }
+        }
+        return args;
+    }
+
+    private void roundtripAsymmetric(int wrappingKeySize, KeyPair keyPair, Provider wrappingProvider, Provider unwrappingProvider, boolean reuseCipher) throws Exception {
+        final SecureRandom ignored = null;
+        final SecretKey wrappingKey = getAesKey(wrappingKeySize);
+
+        Cipher c = getCipher(wrappingProvider);
+        c.init(Cipher.WRAP_MODE, wrappingKey);
+        byte[] wrappedPublicKey = c.wrap(keyPair.getPublic());
+        byte[] wrappedPrivateKey = c.wrap(keyPair.getPrivate());
+        assertFalse(Arrays.equals(keyPair.getPublic().getEncoded(), wrappedPublicKey));
+        assertFalse(Arrays.equals(keyPair.getPrivate().getEncoded(), wrappedPrivateKey));
+        if (!reuseCipher) {
+            c = getCipher(unwrappingProvider);
+        } else {
+            assertTrue(unwrappingProvider == null);
+        }
+        c.init(Cipher.UNWRAP_MODE, wrappingKey);
+        Key unwrappedPublicKey = c.unwrap(wrappedPublicKey, keyPair.getPublic().getAlgorithm(), Cipher.PUBLIC_KEY);
+        Key unwrappedPrivateKey = c.unwrap(wrappedPrivateKey, keyPair.getPrivate().getAlgorithm(), Cipher.PRIVATE_KEY);
+        assertArraysHexEquals(keyPair.getPublic().getEncoded(), unwrappedPublicKey.getEncoded());
+        assertArraysHexEquals(keyPair.getPrivate().getEncoded(), unwrappedPrivateKey.getEncoded());
+        assertEquals(keyPair.getPublic(), unwrappedPublicKey);
+        assertEquals(keyPair.getPrivate(), unwrappedPrivateKey);
+
+        // By passing it through the factory we ensure that it is an understandable type
+        final KeyFactory kf = KeyFactory.getInstance(keyPair.getPublic().getAlgorithm(), TestUtil.NATIVE_PROVIDER);
+        assertArraysHexEquals(
+            kf.getKeySpec(keyPair.getPrivate(), PKCS8EncodedKeySpec.class).getEncoded(),
+            kf.getKeySpec(unwrappedPrivateKey, PKCS8EncodedKeySpec.class).getEncoded()
+        );
+        assertArraysHexEquals(
+            kf.getKeySpec(keyPair.getPublic(), X509EncodedKeySpec.class).getEncoded(),
+            kf.getKeySpec(unwrappedPublicKey, X509EncodedKeySpec.class).getEncoded()
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsAsymmetric")
+    public void roundtripNativeSameCipherAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.NATIVE_PROVIDER, null, true);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsAsymmetric")
+    public void roundtripNativeNewCipherAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.NATIVE_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsAsymmetric")
+    public void roundtripNative2BCAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.NATIVE_PROVIDER, TestUtil.BC_PROVIDER, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsAsymmetric")
+    public void roundtripBC2nativeAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.BC_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsAsymmetric")
+    public void roundtripNative2JCEAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        TestUtil.assumeMinimumJavaVersion(17);  // KWP added to JCE in 17 https://bugs.openjdk.org/browse/JDK-8248268
+        roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.NATIVE_PROVIDER, null, false);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsAsymmetric")
+    public void roundtripJCE2nativeAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        TestUtil.assumeMinimumJavaVersion(17);  // KWP added to JCE in 17 https://bugs.openjdk.org/browse/JDK-8248268
+        roundtripAsymmetric(wrappingKeySize, keyPair, null, TestUtil.NATIVE_PROVIDER, false);
     }
 
     // NOTE: this funciton is a convenience to make the test code cleaner
     //       across providers that use different aliases to provide the same
     //       Cipher. it relies on nativeProviderAliasTest to ensure that we
     //       provide ciphers across all expected aliases.
-    private static Cipher getCipher(Provider provider) throws Exception {
-        Exception lastEx = null;
+    private static Cipher getCipher(Provider provider) throws GeneralSecurityException {
+        GeneralSecurityException lastEx = null;
         for (String alias : KWP_CIPHER_ALIASES) {
             try {
                 if (provider != null) {
@@ -139,11 +232,15 @@ public final class AesKeyWrapTest {
                 } else {
                     return Cipher.getInstance(alias);
                 }
-            } catch (Exception e) { // TODO [childw] tighten this exception type up and in mthd signature
+            } catch (GeneralSecurityException e) {
                 lastEx = e;
             }
         }
         throw lastEx;
+    }
+
+    private static SecretKey getAesKey(int size) {
+        return new SecretKeySpec(TestUtil.getRandomBytes(size), "AES");
     }
 
     @Test
