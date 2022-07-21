@@ -285,7 +285,7 @@ final class AesKeyWrapSpi extends CipherSpi {
         byte[] encoded = null;
         try {
             encoded = Utils.encodeForWrapping(provider, key);
-            return engineDoFinal(encoded, 0, encoded.length);
+            return implDoFinal(encoded, 0, encoded.length);
         } catch (final Exception ex) {
             throw new InvalidKeyException("Wrapping failed", ex);
         } finally {
@@ -303,7 +303,7 @@ final class AesKeyWrapSpi extends CipherSpi {
         }
         byte[] unwrappedKey = null;
         try {
-            unwrappedKey = engineDoFinal(wrappedKey, 0, wrappedKey.length);
+            unwrappedKey = implDoFinal(wrappedKey, 0, wrappedKey.length);
             return Utils.buildUnwrappedKey(provider, unwrappedKey, wrappedKeyAlgorithm, wrappedKeyType);
         } catch (final Exception ex) {
             throw new InvalidKeyException("Unwrapping failed", ex);
