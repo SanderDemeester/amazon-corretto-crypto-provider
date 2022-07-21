@@ -11,7 +11,9 @@ import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.Provider;
+import java.security.PrivateKey;
 import java.security.SecureRandom;
+import java.security.Signature;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
@@ -100,13 +102,13 @@ public final class AesKeyWrapTest {
 
     @ParameterizedTest
     @MethodSource("getParamsGeneric")
-    public void roundtripNative2BCGeneric(int wrappingKeySize, int secretSize) throws Exception {
+    public void roundtripNative2BouncyGeneric(int wrappingKeySize, int secretSize) throws Exception {
         roundtripGeneric(wrappingKeySize, secretSize, TestUtil.NATIVE_PROVIDER, TestUtil.BC_PROVIDER, false);
     }
 
     @ParameterizedTest
     @MethodSource("getParamsGeneric")
-    public void roundtripBC2nativeGeneric(int wrappingKeySize, int secretSize) throws Exception {
+    public void roundtripBouncy2nativeGeneric(int wrappingKeySize, int secretSize) throws Exception {
         roundtripGeneric(wrappingKeySize, secretSize, TestUtil.BC_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
     }
 
@@ -195,15 +197,55 @@ public final class AesKeyWrapTest {
 
     @ParameterizedTest
     @MethodSource("getParamsAsymmetric")
-    public void roundtripNative2BCAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
-        // TODO [childw] get to the bottom of why BC is unwrapping EC private keys differently from ACCP and JCE.
+    public void roundtripNative2BouncyAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+        // TODO [childw] get to the bottom of why BC is unwrapping EC private
+        //      keys differently from ACCP and JCE, then remove this assumption
+        //      from the parameterized test. in the meantime, we have a
+        //      temporary test below showing that while the unwrapping with BC
+        //      an ACCP-wrapped EC key does not produce a byte-for-byte replica
+        //      of the original, it's still possible to use both keys for signing.
         org.junit.jupiter.api.Assumptions.assumeTrue(!display.startsWith("EC("));
         roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.NATIVE_PROVIDER, TestUtil.BC_PROVIDER, false);
     }
 
+    @Test
+    public void testNative2BouncyECPrivateKeySignaturesOK() throws Exception {
+        KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC", TestUtil.NATIVE_PROVIDER);
+        kpg.initialize(new ECGenParameterSpec("secp256r1"));
+        KeyPair keyPair = kpg.generateKeyPair();
+        final SecretKey wrappingKey = getAesKey(128/8);
+
+        Cipher wrapper = Cipher.getInstance("AESWRAPPAD", TestUtil.NATIVE_PROVIDER);
+        wrapper.init(Cipher.WRAP_MODE, wrappingKey);
+        byte[] wrappedPrivateKey = wrapper.wrap(keyPair.getPrivate());
+        wrapper = Cipher.getInstance("AESWRAPPAD", TestUtil.BC_PROVIDER);
+        wrapper.init(Cipher.WRAP_MODE, wrappingKey);
+        wrapper.init(Cipher.UNWRAP_MODE, wrappingKey);
+        Key unwrappedPrivateKey = wrapper.unwrap(wrappedPrivateKey, "EC", Cipher.PRIVATE_KEY);
+
+        Signature signer = Signature.getInstance("SHA256withECDSA", TestUtil.NATIVE_PROVIDER);
+        final byte[] message = TestUtil.getRandomBytes(1024);
+        signer.initSign(keyPair.getPrivate());
+        signer.update(message);
+        final byte[] goodSignature = signer.sign();
+        signer.initSign((PrivateKey) unwrappedPrivateKey);
+        signer.update(message);
+        final byte[] unwrappedKeySignature = signer.sign();
+        assertFalse(Arrays.equals(keyPair.getPrivate().getEncoded(), unwrappedPrivateKey.getEncoded()));
+        assertFalse(Arrays.equals(goodSignature, unwrappedKeySignature));
+
+        Signature verifier = Signature.getInstance("SHA256withECDSA", TestUtil.NATIVE_PROVIDER);
+        verifier.initVerify(keyPair.getPublic());
+        verifier.update(message);
+        assertTrue(verifier.verify(goodSignature));
+        verifier.initVerify(keyPair.getPublic());
+        verifier.update(message);
+        assertTrue(verifier.verify(unwrappedKeySignature));
+    }
+
     @ParameterizedTest
     @MethodSource("getParamsAsymmetric")
-    public void roundtripBC2nativeAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
+    public void roundtripBouncy2nativeAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
         roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.BC_PROVIDER, TestUtil.NATIVE_PROVIDER, false);
     }
 

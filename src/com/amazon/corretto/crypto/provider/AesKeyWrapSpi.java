@@ -224,26 +224,10 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     @Override
     protected byte[] engineDoFinal(byte[] in, int inOfs, int inLen) {
-        // TODO [childw] how to do this check more cleanly?
-        //if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
-            //throw new IllegalStateException("Cipher not initialized for finalization");
-        //}
-        final int estimatedOutLen = engineGetOutputSize(inLen - inOfs);
-        byte[] out = new byte[estimatedOutLen];
-        final int actualOutLen = implDoFinal(in, inOfs, inLen, out, 0);
-        // If we overestimated the size of the output (possible in unwrapping),
-        // we need to copy only the output's bytes over to a newer, smaller
-        // byte array.  Java's inability to truncate arrays after creation
-        // forces us to do this. Note that in the common case of block-aligned
-        // key sizes, our estimates are correct and this copy is avoided.
-        if (actualOutLen < estimatedOutLen) {
-            final byte[] tmp = new byte[actualOutLen];
-            System.arraycopy(out, 0, tmp, 0, tmp.length);
-            //Arrays.fill(out, (byte) 0);
-            return tmp;
-            //out = tmp;
+        if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
+            throw new IllegalStateException("Cipher not initialized for finalization");
         }
-        return out;
+        return implDoFinal(in, inOfs, inLen);
     }
 
     @Override
@@ -252,6 +236,24 @@ final class AesKeyWrapSpi extends CipherSpi {
             throw new IllegalStateException("Cipher not initialized for finalization");
         }
         return implDoFinal(in, inOfs, inLen, out, outOfs);
+    }
+
+    private byte[] implDoFinal(byte[] in, int inOfs, int inLen) {
+        final int estimatedOutLen = engineGetOutputSize(inLen - inOfs);
+        byte[] out = new byte[estimatedOutLen];
+        final int actualOutLen = implDoFinal(in, inOfs, inLen, out, 0);
+        // If we overestimated the size of the output (possible in unwrapping),
+        // we need to copy only the output's bytes over to a newer, smaller
+        // byte array. Java's inability to truncate arrays after creation
+        // forces us to do this. Note that in the common case of block-aligned
+        // key sizes, our estimates are correct and this extra copy is avoided.
+        if (actualOutLen < estimatedOutLen) {
+            final byte[] tmp = new byte[actualOutLen];
+            System.arraycopy(out, 0, tmp, 0, tmp.length);
+            Arrays.fill(out, (byte) 0);
+            out = tmp;
+        }
+        return out;
     }
 
     private int implDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
