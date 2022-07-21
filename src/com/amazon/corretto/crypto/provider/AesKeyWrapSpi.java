@@ -44,15 +44,19 @@ final class AesKeyWrapSpi extends CipherSpi {
     private SecretKey jceKey;
     private byte[] keyBytes;
     private int opmode = -1;    // must be set by init(..)
+    private final AccessibleByteArrayOutputStream buffer;
 
     AesKeyWrapSpi(final AmazonCorrettoCryptoProvider provider) {
         Loader.checkNativeLibraryAvailability();
         this.provider = provider;
+        // set initial capacity for the buffer to 0 because we need it to grow
+        // _precisely_ with the amount of data we're buffering.
+        buffer = new AccessibleByteArrayOutputStream(0, Integer.MAX_VALUE);
     }
 
-    private static native int wrapKey(byte[] key, byte[] input, byte[] output);
+    private static native int wrapKey(byte[] key, byte[] input, byte[] output, int outOf);
 
-    private static native int unwrapKey(byte[] key, byte[] input, byte[] output);
+    private static native int unwrapKey(byte[] key, byte[] input, byte[] output, int outOf);
 
     @Override
     protected void engineSetMode(String mode) throws NoSuchAlgorithmException {
@@ -82,14 +86,14 @@ final class AesKeyWrapSpi extends CipherSpi {
     @Override
     protected int engineGetOutputSize(final int inputLen) {
         // TODO [childw] specific unit tests
-        // TODO [childw] adjust this to account for buffering
+        final int totalInLen = buffer.size() + inputLen;
         switch (opmode) {
             case Cipher.WRAP_MODE:
             case Cipher.ENCRYPT_MODE:
-                return getWrappedLen(inputLen);
+                return getWrappedLen(totalInLen);
             case Cipher.UNWRAP_MODE:
             case Cipher.DECRYPT_MODE:
-                return estimateUnwrappedLen(inputLen);
+                return estimateUnwrappedLen(totalInLen);
             default:
                 throw new AssertionError();
         }
@@ -129,10 +133,10 @@ final class AesKeyWrapSpi extends CipherSpi {
     }
 
     @Override
-    protected void engineInit(int opmode, Key key, SecureRandom random)
+    protected void engineInit(int opmode, Key key, SecureRandom ignored)
         throws InvalidKeyException {
         try {
-            implInit(opmode, key, random);
+            implInit(opmode, key);
         } catch (InvalidAlgorithmParameterException iae) {
             // should never happen
             throw new AssertionError(iae);
@@ -154,17 +158,16 @@ final class AesKeyWrapSpi extends CipherSpi {
     }
 
     @Override
-    protected void engineInit(int opmode, Key key, AlgorithmParameterSpec params, SecureRandom random)
+    protected void engineInit(int opmode, Key key, AlgorithmParameterSpec params, SecureRandom ignored)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
         if (params != null && !(params instanceof IvParameterSpec)
                 && !MessageDigest.isEqual(ICV2, ((IvParameterSpec) params).getIV())) {
             throw new InvalidAlgorithmParameterException("Only ICV2 IvParameterSpec is accepted");
         }
-        implInit(opmode, key, random);
+        implInit(opmode, key);
     }
 
-    private void implInit(int opmode, Key key, SecureRandom ignored)
-            throws InvalidKeyException, InvalidAlgorithmParameterException {
+    private void implInit(int opmode, Key key) throws InvalidKeyException, InvalidAlgorithmParameterException {
         if (opmode != Cipher.UNWRAP_MODE && opmode != Cipher.WRAP_MODE) {
             throw new UnsupportedOperationException("Cipher only supports un/wrap modes");
         }
@@ -192,6 +195,84 @@ final class AesKeyWrapSpi extends CipherSpi {
             jceKey = (SecretKey) key;
         }
         this.opmode = opmode;
+        buffer.reset();
+    }
+
+    @Override
+    protected byte[] engineUpdate(byte[] in, int inOfs, int inLen) {
+        if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
+            throw new IllegalStateException("Cipher not initialized for update");
+        }
+        implUpdate(in, inOfs, inLen);
+        return null;
+    }
+
+    @Override
+    protected int engineUpdate(byte[] in, int inOfs, int inLen, byte[] out, int outOf)
+            throws ShortBufferException {
+        if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
+            throw new IllegalStateException("Cipher not initialized for update");
+        }
+        // TODO [childw] check for short output buffer
+        implUpdate(in, inOfs, inLen);
+        return 0;
+    }
+
+    private void implUpdate(byte[] in, int inOfs, int inLen) {
+        buffer.write(in, inOfs, inLen);
+    }
+
+    @Override
+    protected byte[] engineDoFinal(byte[] in, int inOfs, int inLen) {
+        // TODO [childw] how to do this check more cleanly?
+        //if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
+            //throw new IllegalStateException("Cipher not initialized for finalization");
+        //}
+        final int estimatedOutLen = engineGetOutputSize(inLen - inOfs);
+        byte[] out = new byte[estimatedOutLen];
+        final int actualOutLen = implDoFinal(in, inOfs, inLen, out, 0);
+        // If we overestimated the size of the output (possible in unwrapping),
+        // we need to copy only the output's bytes over to a newer, smaller
+        // byte array.  Java's inability to truncate arrays after creation
+        // forces us to do this. Note that in the common case of block-aligned
+        // key sizes, our estimates are correct and this copy is avoided.
+        if (actualOutLen < estimatedOutLen) {
+            final byte[] tmp = new byte[actualOutLen];
+            System.arraycopy(out, 0, tmp, 0, tmp.length);
+            //Arrays.fill(out, (byte) 0);
+            return tmp;
+            //out = tmp;
+        }
+        return out;
+    }
+
+    @Override
+    protected int engineDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
+        if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
+            throw new IllegalStateException("Cipher not initialized for finalization");
+        }
+        return implDoFinal(in, inOfs, inLen, out, outOfs);
+    }
+
+    private int implDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
+        implUpdate(in, inOfs, inLen);
+        buffer.trim();
+        // TODO [childw] validate that there's enough room after outOfs in out to do this safely
+        final int outLen;
+        switch (opmode) {
+            case Cipher.ENCRYPT_MODE:
+            case Cipher.WRAP_MODE:
+                outLen = wrapKey(keyBytes, buffer.getDataBuffer(), out, outOfs);
+                break;
+            case Cipher.DECRYPT_MODE:
+            case Cipher.UNWRAP_MODE:
+                outLen = unwrapKey(keyBytes, buffer.getDataBuffer(), out, outOfs);
+                break;
+            default:
+                throw new IllegalStateException("Cipher not initialized for finalization");
+        }
+        buffer.reset();
+        return outLen;
     }
 
     @Override
@@ -202,9 +283,7 @@ final class AesKeyWrapSpi extends CipherSpi {
         byte[] encoded = null;
         try {
             encoded = Utils.encodeForWrapping(provider, key);
-            final byte[] wrappedKey = new byte[engineGetOutputSize(encoded.length)];
-            wrapKey(keyBytes, encoded, wrappedKey);
-            return wrappedKey;
+            return engineDoFinal(encoded, 0, encoded.length);
         } catch (final Exception ex) {
             throw new InvalidKeyException("Wrapping failed", ex);
         } finally {
@@ -220,45 +299,16 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (opmode != Cipher.UNWRAP_MODE || keyBytes == null) {
             throw new IllegalStateException("Cipher must be init'd in UNWRAP_MODE");
         }
-        byte[] unwrappedKey = new byte[engineGetOutputSize(wrappedKey.length)];
+        byte[] unwrappedKey = null;
         try {
-            int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey);
-            // If we overestimated the size of the unwrapped key, we need to
-            // copy only the key's bytes over to a newer, smaller byte array.
-            // Java's inability to truncate arrays after creation forces us to
-            // do this. Note that in the common case of block-aligned key sizes
-            // our estimates are correct and this copy is avoided.
-            if (unwrappedKeyLen < unwrappedKey.length) {
-                final byte[] tmp = new byte[unwrappedKeyLen];
-                System.arraycopy(unwrappedKey, 0, tmp, 0, unwrappedKeyLen);
-                Arrays.fill(unwrappedKey, (byte) 0);
-                unwrappedKey = tmp;
-            }
+            unwrappedKey = engineDoFinal(wrappedKey, 0, wrappedKey.length);
             return Utils.buildUnwrappedKey(provider, unwrappedKey, wrappedKeyAlgorithm, wrappedKeyType);
         } catch (final Exception ex) {
             throw new InvalidKeyException("Unwrapping failed", ex);
         } finally {
-            Arrays.fill(unwrappedKey, (byte) 0);
+            if (unwrappedKey != null) {
+                Arrays.fill(unwrappedKey, (byte) 0);
+            }
         }
-    }
-
-    @Override
-    protected byte[] engineUpdate(byte[] in, int inOffset, int inLen) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    protected int engineUpdate(byte[] in, int inOffset, int inLen,
-            byte[] out, int outOffset) throws ShortBufferException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    protected byte[] engineDoFinal(byte[] in, int inOfs, int inLen) {
-        throw new UnsupportedOperationException();
-    }
-
-    protected int engineDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
-        throw new UnsupportedOperationException();
     }
 }

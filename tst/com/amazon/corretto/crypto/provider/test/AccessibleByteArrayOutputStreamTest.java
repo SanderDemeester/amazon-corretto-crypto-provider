@@ -109,6 +109,11 @@ public class AccessibleByteArrayOutputStreamTest {
         assertArrayEquals(expected, sneakyInvoke(cloned, "getDataBuffer"));
     }
 
+    @Test
+    public void testTrim() throws Throwable {
+        // TODO [childw]
+    }
+
     private static OutputStream getInstance(final Object... args) throws Throwable {
         return (OutputStream) sneakyConstruct("com.amazon.corretto.crypto.provider.AccessibleByteArrayOutputStream", args);
     }
