@@ -81,9 +81,35 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     @Override
     protected int engineGetOutputSize(final int inputLen) {
-        // TODO [childw] is below valid?
-        // return inputLen + 15;
-        throw new UnsupportedOperationException();
+        // TODO [childw] specific unit tests
+        // TODO [childw] adjust this to account for buffering
+        switch (opmode) {
+            case Cipher.WRAP_MODE:
+            case Cipher.ENCRYPT_MODE:
+                return getWrappedLen(inputLen);
+            case Cipher.UNWRAP_MODE:
+            case Cipher.DECRYPT_MODE:
+                return estimateUnwrappedLen(inputLen);
+            default:
+                throw new AssertionError();
+        }
+    }
+
+    // TODO [childw] explanatory note about +8 for the additional block added
+    //               in all cases
+    private static int getWrappedLen(final int unwrappedLen) {
+        final int paddingLen;
+        if (unwrappedLen % 8 == 0) {
+            paddingLen = 0;
+        } else {
+            paddingLen = 8 - (unwrappedLen % 8);
+        }
+        return unwrappedLen + paddingLen + 8;
+    }
+
+    // TODO [childw] explanatory note that this is just an estimate
+    private static int estimateUnwrappedLen(final int wrappedLen) {
+        return wrappedLen - 8;
     }
 
     @Override
@@ -176,11 +202,8 @@ final class AesKeyWrapSpi extends CipherSpi {
         byte[] encoded = null;
         try {
             encoded = Utils.encodeForWrapping(provider, key);
-            final int paddingLen = encoded.length % 8 == 0 ? 0 : (8 - (encoded.length % 8));
-            final int expectedWrappedLen = encoded.length + paddingLen + 8;
-            final byte[] wrappedKey = new byte[expectedWrappedLen];
-            int wrappedKeyLen = wrapKey(keyBytes, encoded, wrappedKey);
-            // TODO [childw] throw an ecxeption if our expectation was off?
+            final byte[] wrappedKey = new byte[engineGetOutputSize(encoded.length)];
+            wrapKey(keyBytes, encoded, wrappedKey);
             return wrappedKey;
         } catch (final Exception ex) {
             throw new InvalidKeyException("Wrapping failed", ex);
@@ -197,15 +220,14 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (opmode != Cipher.UNWRAP_MODE || keyBytes == null) {
             throw new IllegalStateException("Cipher must be init'd in UNWRAP_MODE");
         }
-        // TODO [childw] note about >= 8 bytes of padding, optimality of
-        //               8-byte-block-aligned keys as common case.
-        byte[] unwrappedKey = new byte[wrappedKey.length-8];
+        byte[] unwrappedKey = new byte[engineGetOutputSize(wrappedKey.length)];
         try {
             int unwrappedKeyLen = unwrapKey(keyBytes, wrappedKey, unwrappedKey);
             // If we overestimated the size of the unwrapped key, we need to
             // copy only the key's bytes over to a newer, smaller byte array.
             // Java's inability to truncate arrays after creation forces us to
-            // do this.
+            // do this. Note that in the common case of block-aligned key sizes
+            // our estimates are correct and this copy is avoided.
             if (unwrappedKeyLen < unwrappedKey.length) {
                 final byte[] tmp = new byte[unwrappedKeyLen];
                 System.arraycopy(unwrappedKey, 0, tmp, 0, unwrappedKeyLen);
