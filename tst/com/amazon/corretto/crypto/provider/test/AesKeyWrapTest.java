@@ -263,6 +263,61 @@ public final class AesKeyWrapTest {
         roundtripAsymmetric(wrappingKeySize, keyPair, null, TestUtil.NATIVE_PROVIDER, false);
     }
 
+    public static List<Arguments> getParamsIncremental() {
+        final int[] stepSizes = new int[] { 1, 7, 9, 16, 17, 32 };
+        final int[] doFinalSizes = new int[] { 0, 1, 7, 9, 16, 17, 32 };
+        final List<Arguments> args = new ArrayList<>();
+        for (Arguments other : getParamsGeneric()) {
+            for (int stepSize : stepSizes) {
+                for (int doFinalSize : doFinalSizes) {
+                    args.add(Arguments.of(other.get()[0], other.get()[1], stepSize, doFinalSize));
+                }
+            }
+        }
+        return args;
+    }
+
+    private void roundtripIncremental(int wrappingKeySize, int secretSize, int stepSize,
+            int doFinalSize) throws Exception {
+        final SecretKey wrappingKey = getAesKey(wrappingKeySize);
+        final byte[] secret = TestUtil.getRandomBytes(secretSize);
+
+        Cipher c = getCipher(TestUtil.NATIVE_PROVIDER);
+        c.init(Cipher.ENCRYPT_MODE, wrappingKey);
+        int updateLimit = secret.length - doFinalSize;
+        // if doFinalSize is greater than the data we're working with, then
+        // don't add any more data in the doFinal call.
+        if (updateLimit < 0) {
+            updateLimit = secret.length;
+        }
+        for (int ii = 0; ii < updateLimit; ii += stepSize) {
+            byte[] chunk = Arrays.copyOfRange(secret, ii, Math.min(ii+stepSize, updateLimit));
+            c.update(chunk);
+        }
+        byte[] ciphertext = c.doFinal(Arrays.copyOfRange(secret, updateLimit, secret.length));
+        assertFalse(Arrays.equals(secret, ciphertext));
+        c.init(Cipher.DECRYPT_MODE, wrappingKey);
+        updateLimit = ciphertext.length - doFinalSize;
+        // if doFinalSize is greater than the data we're working with, then
+        // don't add any more data in the doFinal call.
+        if (updateLimit < 0) {
+            updateLimit = ciphertext.length;
+        }
+        for (int ii = 0; ii < updateLimit; ii += stepSize) {
+            byte[] chunk = Arrays.copyOfRange(ciphertext, ii, Math.min(ii+stepSize, updateLimit));
+            c.update(chunk);
+        }
+        byte[] plaintext = c.doFinal(Arrays.copyOfRange(ciphertext, updateLimit, ciphertext.length));
+        assertArraysHexEquals(secret, plaintext);
+    }
+
+    @ParameterizedTest
+    @MethodSource("getParamsIncremental")
+    public void roundtripNativeSameCipherIncremental(int wrappingKeySize, int secretSize, int stepSize,
+            int doFinalSize) throws Exception {
+        roundtripIncremental(wrappingKeySize, secretSize, stepSize, doFinalSize);
+    }
+
     // NOTE: this funciton is a convenience to make the test code cleaner
     //       across providers that use different aliases to provide the same
     //       Cipher. it relies on nativeProviderAliasTest to ensure that we

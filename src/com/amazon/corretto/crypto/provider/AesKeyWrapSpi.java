@@ -49,14 +49,12 @@ final class AesKeyWrapSpi extends CipherSpi {
     AesKeyWrapSpi(final AmazonCorrettoCryptoProvider provider) {
         Loader.checkNativeLibraryAvailability();
         this.provider = provider;
-        // set initial capacity for the buffer to 0 because we need it to grow
-        // _precisely_ with the amount of data we're buffering.
-        buffer = new AccessibleByteArrayOutputStream(0, Integer.MAX_VALUE);
+        buffer = new AccessibleByteArrayOutputStream();
     }
 
-    private static native int wrapKey(byte[] key, byte[] input, byte[] output, int outOf);
+    private static native int wrapKey(byte[] key, byte[] input, int inLen, byte[] output, int outOf);
 
-    private static native int unwrapKey(byte[] key, byte[] input, byte[] output, int outOf);
+    private static native int unwrapKey(byte[] key, byte[] input, int inLen, byte[] output, int outOf);
 
     @Override
     protected void engineSetMode(String mode) throws NoSuchAlgorithmException {
@@ -168,8 +166,9 @@ final class AesKeyWrapSpi extends CipherSpi {
     }
 
     private void implInit(int opmode, Key key) throws InvalidKeyException, InvalidAlgorithmParameterException {
-        if (opmode != Cipher.UNWRAP_MODE && opmode != Cipher.WRAP_MODE) {
-            throw new UnsupportedOperationException("Cipher only supports un/wrap modes");
+        if (opmode != Cipher.UNWRAP_MODE && opmode != Cipher.WRAP_MODE
+                && opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
+            throw new UnsupportedOperationException("Unsupported mode");
         }
         if (key == null) {
             throw new InvalidKeyException("Null key");
@@ -223,7 +222,9 @@ final class AesKeyWrapSpi extends CipherSpi {
     }
 
     private void implUpdate(byte[] in, int inOfs, int inLen) {
-        buffer.write(in, inOfs, inLen);
+        if (in != null && in.length > 0 && inLen - inOfs > 0) {
+            buffer.write(in, inOfs, inLen);
+        }
     }
 
     @Override
@@ -262,17 +263,16 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     private int implDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
         implUpdate(in, inOfs, inLen);
-        buffer.trim();
         // TODO [childw] validate that there's enough room after outOfs in out to do this safely
         final int outLen;
         switch (opmode) {
             case Cipher.ENCRYPT_MODE:
             case Cipher.WRAP_MODE:
-                outLen = wrapKey(keyBytes, buffer.getDataBuffer(), out, outOfs);
+                outLen = wrapKey(keyBytes, buffer.getDataBuffer(), buffer.size(), out, outOfs);
                 break;
             case Cipher.DECRYPT_MODE:
             case Cipher.UNWRAP_MODE:
-                outLen = unwrapKey(keyBytes, buffer.getDataBuffer(), out, outOfs);
+                outLen = unwrapKey(keyBytes, buffer.getDataBuffer(), buffer.size(), out, outOfs);
                 break;
             default:
                 throw new IllegalStateException("Cipher not initialized for finalization");

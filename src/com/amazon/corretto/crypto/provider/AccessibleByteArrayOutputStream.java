@@ -210,19 +210,10 @@ class AccessibleByteArrayOutputStream extends OutputStream implements Cloneable 
         }
         //@ use lemma_can_be_doubled(buf.length);
         final int predictedSize = Math.min(limit, buf.length << 1);
-        buf = copyAndZeroize(buf, Math.max(predictedSize, newCapacity), count);
-    }
 
-    void trim() {
-        if (buf.length == count) {
-            return;
-        }
-        buf = copyAndZeroize(buf, count, count);
-    }
-
-    private static byte[] copyAndZeroize(byte[] src, int copySize, int zeroCount) {
-        final byte[] ret = Arrays.copyOf(src, copySize);
-        Arrays.fill(src, 0, zeroCount, (byte) 0);
-        return ret;
+        final byte[] tmp = Arrays.copyOf(buf, Math.max(predictedSize, newCapacity));
+        final byte[] toZeroize = buf;
+        buf = tmp;
+        Arrays.fill(toZeroize, 0, count, (byte) 0);
     }
 }

@@ -22,6 +22,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wra
   jclass,
   jbyteArray keyArray,
   jbyteArray inputArray,
+  jint inputLength,
   jbyteArray outputArray,
   jint outputOffset
 )
@@ -30,7 +31,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_wra
         raii_env env(pEnv);
 
         java_buffer key = java_buffer::from_array(env, keyArray);
-        java_buffer input = java_buffer::from_array(env, inputArray);
+        java_buffer input = java_buffer::from_array(env, inputArray, 0, inputLength);
         java_buffer output = java_buffer::from_array(env, outputArray, outputOffset);
 
         AES_KEY aes_key;
@@ -62,6 +63,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
   jclass,
   jbyteArray keyArray,
   jbyteArray inputArray,
+  jint inputLength,
   jbyteArray outputArray,
   jint outputOffset
 )
@@ -70,7 +72,7 @@ JNIEXPORT int JNICALL Java_com_amazon_corretto_crypto_provider_AesKeyWrapSpi_unw
         raii_env env(pEnv);
 
         java_buffer key = java_buffer::from_array(env, keyArray);
-        java_buffer input = java_buffer::from_array(env, inputArray);
+        java_buffer input = java_buffer::from_array(env, inputArray, 0, inputLength);
         java_buffer output = java_buffer::from_array(env, outputArray, outputOffset);
 
         AES_KEY aes_key;
