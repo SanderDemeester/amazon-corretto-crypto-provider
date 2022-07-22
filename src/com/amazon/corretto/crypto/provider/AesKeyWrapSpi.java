@@ -29,9 +29,7 @@ import javax.crypto.ShortBufferException;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.IvParameterSpec;
 
-/**
- * TODO [childw]
- */
+
 final class AesKeyWrapSpi extends CipherSpi {
     private static final int BLOCK_SIZE = 128 / 8;
     private static final byte[] ICV2 = { (byte) 0xa6, (byte) 0x59, (byte) 0x59, (byte) 0xa6 };
@@ -78,27 +76,32 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     @Override
     protected int engineGetKeySize(final Key key) throws InvalidKeyException {
-        return key.getEncoded().length * 8;
+        byte[] encoded = key.getEncoded();
+        if (encoded == null) {
+            throw new InvalidKeyException("Can't encode key to obtain length");
+        }
+        int keyLen = key.getEncoded().length;
+        Arrays.fill(encoded, (byte) 0);
+        return Math.multiplyExact(keyLen, 8);
     }
 
     @Override
     protected int engineGetOutputSize(final int inputLen) {
-        // TODO [childw] specific unit tests
-        final int totalInLen = buffer.size() + inputLen;
+        final int totalInLen = Math.addExact(buffer.size(), inputLen);
         switch (opmode) {
             case Cipher.WRAP_MODE:
             case Cipher.ENCRYPT_MODE:
                 return getWrappedLen(totalInLen);
             case Cipher.UNWRAP_MODE:
             case Cipher.DECRYPT_MODE:
-                return estimateUnwrappedLen(totalInLen);
             default:
-                throw new AssertionError();
+                return estimateUnwrappedLen(totalInLen);
         }
     }
 
-    // TODO [childw] explanatory note about +8 for the additional block added
-    //               in all cases
+    // RFC-5649 describes KWP's padding scheme. The key is padded out to a byte
+    // length divisible by 8, then an additional 8-byte block of padding is
+    // appended.
     private static int getWrappedLen(final int unwrappedLen) {
         final int paddingLen;
         if (unwrappedLen % 8 == 0) {
@@ -106,12 +109,18 @@ final class AesKeyWrapSpi extends CipherSpi {
         } else {
             paddingLen = 8 - (unwrappedLen % 8);
         }
-        return unwrappedLen + paddingLen + 8;
+        return Math.addExact(Math.addExact(unwrappedLen, paddingLen), 8);
     }
 
-    // TODO [childw] explanatory note that this is just an estimate
+    // Because the key is padded before it is wrapped (i.e. encrypted), we have
+    // no way of knowing the unwrapped key's precise size beforehand. The best
+    // we can do is to "guess" by accounting for the 8 bytes of padding that
+    // are added in all cases before wrapping.
     private static int estimateUnwrappedLen(final int wrappedLen) {
-        return wrappedLen - 8;
+        if (wrappedLen < 16) {
+             return 8;
+        }
+        return Math.subtractExact(wrappedLen, 8);
     }
 
     @Override
@@ -203,6 +212,7 @@ final class AesKeyWrapSpi extends CipherSpi {
             throw new IllegalStateException("Cipher not initialized for update");
         }
         implUpdate(in, inOfs, inLen);
+        // we don't output individual blocks, we instead output the whole result at doFinal
         return null;
     }
 
@@ -212,16 +222,20 @@ final class AesKeyWrapSpi extends CipherSpi {
         if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
             throw new IllegalStateException("Cipher not initialized for update");
         }
-        // TODO [childw] check for short output buffer
         // NOTE: we ignore |out| and |outOf| entirely because this CipherSpi implementation
         //       does not output "blocks" incrementally, we merely buffer the input data and
         //       and incorporate it into the final one-shot crypt call over JNI. see CipherSpi
         //       javadoc for engineUpdate for more details.
         implUpdate(in, inOfs, inLen);
+        // we don't output individual blocks, we instead output the whole result at doFinal
         return 0;
     }
 
-    private void implUpdate(byte[] in, int inOfs, int inLen) {
+    private void implUpdate(byte[] in, int inOfs, int inLenIn) {
+        int inLen = inLenIn;
+        if (in != null && Math.addExact(inOfs, inLen) > in.length) {
+            inLen = in.length - inOfs;
+        }
         if (in != null && in.length > 0 && inLen - inOfs > 0) {
             buffer.write(in, inOfs, inLen);
         }
@@ -236,9 +250,13 @@ final class AesKeyWrapSpi extends CipherSpi {
     }
 
     @Override
-    protected int engineDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
+    protected int engineDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) throws ShortBufferException {
         if (opmode != Cipher.ENCRYPT_MODE && opmode != Cipher.DECRYPT_MODE) {
             throw new IllegalStateException("Cipher not initialized for finalization");
+        }
+        int estimatedOutLen = engineGetOutputSize(inLen);
+        if (out.length - outOfs < estimatedOutLen) {
+            throw new ShortBufferException("Output buffer needs size of at least " + estimatedOutLen);
         }
         return implDoFinal(in, inOfs, inLen, out, outOfs);
     }
@@ -263,7 +281,6 @@ final class AesKeyWrapSpi extends CipherSpi {
 
     private int implDoFinal(byte[] in, int inOfs, int inLen, byte[] out, int outOfs) {
         implUpdate(in, inOfs, inLen);
-        // TODO [childw] validate that there's enough room after outOfs in out to do this safely
         final int outLen;
         switch (opmode) {
             case Cipher.ENCRYPT_MODE:

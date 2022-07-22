@@ -1,6 +1,7 @@
 package com.amazon.corretto.crypto.provider.test;
 
 import static com.amazon.corretto.crypto.provider.test.TestUtil.assertArraysHexEquals;
+import static com.amazon.corretto.crypto.provider.test.TestUtil.assertThrows;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -198,12 +199,12 @@ public final class AesKeyWrapTest {
     @ParameterizedTest
     @MethodSource("getParamsAsymmetric")
     public void roundtripNative2BouncyAsymmetric(int wrappingKeySize, KeyPair keyPair, String display) throws Exception {
-        // TODO [childw] get to the bottom of why BC is unwrapping EC private
-        //      keys differently from ACCP and JCE, then remove this assumption
-        //      from the parameterized test. in the meantime, we have a
-        //      temporary test below showing that while the unwrapping with BC
-        //      an ACCP-wrapped EC key does not produce a byte-for-byte replica
-        //      of the original, it's still possible to use both keys for signing.
+        // NOTE: BC is unwrapping EC private keys differently from ACCP and
+        //       JCE, then remove this assumption from the parameterized test.
+        //       in the meantime, we have a temporary test below showing that
+        //       while the unwrapping with BC an ACCP-wrapped EC key does not
+        //       produce a byte-for-byte replica of the original, it's still
+        //       possible to use both keys for signing.
         org.junit.jupiter.api.Assumptions.assumeTrue(!display.startsWith("EC("));
         roundtripAsymmetric(wrappingKeySize, keyPair, TestUtil.NATIVE_PROVIDER, TestUtil.BC_PROVIDER, false);
     }
@@ -318,6 +319,67 @@ public final class AesKeyWrapTest {
         roundtripIncremental(wrappingKeySize, secretSize, stepSize, doFinalSize);
     }
 
+    @Test
+    public void nativeProviderAliasTest() throws Exception {
+        // this test asserts that all expected aliases for the AES KWP cipher
+        // are adequatly supplied by the native provider
+        for (String alias : KWP_CIPHER_ALIASES) {
+            Cipher.getInstance(alias, TestUtil.NATIVE_PROVIDER);
+        }
+    }
+
+    @Test
+    public void testEngineGetOtputSize() throws Exception {
+        final int[] inputSizes = new int[] { 1, 5, 9, 16, 31, 32 };
+        Cipher c = getCipher(TestUtil.NATIVE_PROVIDER);
+        final SecretKey kek = getAesKey(128/8);
+        c.init(Cipher.ENCRYPT_MODE, kek);
+        // first pass, no buffered data
+        for (int inputSize : inputSizes) {
+            assertTrue(c.getOutputSize(inputSize) % 8 == 0);
+            assertTrue(c.getOutputSize(inputSize) >= inputSize + 8);
+        }
+        // second pass, buffer data
+        int bytesBuffered = 0;
+        for (int inputSize : inputSizes) {
+            c.update(new byte[inputSize]);
+            bytesBuffered += inputSize;
+            assertTrue(c.getOutputSize(0) >= bytesBuffered + 8);
+        }
+        int finalOutputSize = c.getOutputSize(0);
+        byte[] ciphertext = c.doFinal();
+        assertEquals(ciphertext.length, finalOutputSize);
+
+        c.init(Cipher.DECRYPT_MODE, kek);
+        // first pass, no buffered data
+        for (int inputSize : inputSizes) {
+            assertTrue(c.getOutputSize(inputSize) == Math.max(inputSize - 8, 8));
+        }
+        // second pass, buffer data
+        for (int inputSize : inputSizes) {
+            c.update(new byte[inputSize]);
+        }
+        // reset and update w/ ciphertext otherwise decrypt will fail.
+        c.init(Cipher.DECRYPT_MODE, kek);
+        c.update(ciphertext);
+        finalOutputSize = c.getOutputSize(0);
+        assertTrue(c.doFinal().length <= finalOutputSize);
+    }
+
+    @Test
+    public void testBadInputs() {
+        // TODO [childw]
+        // setMode
+        // setPadding
+        // getKeySize
+        // getOutputSize
+        // init
+        // update
+        // doFinal
+        // wrap
+        // unwrap
+    }
+
     // NOTE: this funciton is a convenience to make the test code cleaner
     //       across providers that use different aliases to provide the same
     //       Cipher. it relies on nativeProviderAliasTest to ensure that we
@@ -340,14 +402,5 @@ public final class AesKeyWrapTest {
 
     private static SecretKey getAesKey(int size) {
         return new SecretKeySpec(TestUtil.getRandomBytes(size), "AES");
-    }
-
-    @Test
-    public void nativeProviderAliasTest() throws Exception {
-        // this test asserts that all expected aliases for the AES KWP cipher
-        // are adequatly supplied by the native provider
-        for (String alias : KWP_CIPHER_ALIASES) {
-            Cipher.getInstance(alias, TestUtil.NATIVE_PROVIDER);
-        }
     }
 }
