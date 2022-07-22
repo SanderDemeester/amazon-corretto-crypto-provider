@@ -214,6 +214,10 @@ final class AesKeyWrapSpi extends CipherSpi {
             throw new IllegalStateException("Cipher not initialized for update");
         }
         // TODO [childw] check for short output buffer
+        // NOTE: we ignore |out| and |outOf| entirely because this CipherSpi implementation
+        //       does not output "blocks" incrementally, we merely buffer the input data and
+        //       and incorporate it into the final one-shot crypt call over JNI. see CipherSpi
+        //       javadoc for engineUpdate for more details.
         implUpdate(in, inOfs, inLen);
         return 0;
     }

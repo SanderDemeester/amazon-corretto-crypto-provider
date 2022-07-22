@@ -111,7 +111,14 @@ public class AccessibleByteArrayOutputStreamTest {
 
     @Test
     public void testTrim() throws Throwable {
-        // TODO [childw]
+        // NOTE: we only care about length here, so we'll be using 0'd test vectors
+        final int[] writeSizes = new int[] {1, 7, 8, 9, 512+1, ((int) Math.pow(2.0, 8.0))+1};
+        for (int writeSize : writeSizes) {
+            OutputStream os = getInstance(0, Integer.MAX_VALUE);
+            os.write(new byte[writeSize]);
+            sneakyInvoke(os, "trim");
+            assertEquals(writeSize, sneakyInvoke_int(os, "size"));
+        }
     }
 
     private static OutputStream getInstance(final Object... args) throws Throwable {
