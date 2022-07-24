@@ -10,3 +10,6 @@
 *.iml
 *.orig
 /.classpath
+bin/**
+coverage/**
+.project

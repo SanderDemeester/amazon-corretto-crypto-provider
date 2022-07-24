@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 cmake_minimum_required(VERSION 3.8)
+cmake_policy(SET CMP0068 NEW) #added line to specify behavior for policy CMP0068 - seems to be working on my Mac (demees@ comment on 2022/Jul/22)
 project(AmazonCorrettoCryptoProvider)
 include(CheckLibraryExists)
 include(UseJava)
@@ -87,7 +88,7 @@ string(REPLACE ":" ";" TEST_CLASSPATH_LIST "${TEST_CLASSPATH}")
 # Needed as we abuse some of the test compile macros to test shared lib links
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # CMake's default RPath handling includes the full build directory path, which isn't needed. Turn it off.
-set(CMAKE_SKIP_RPATH TRUE)
+set(CMAKE_SKIP_RPATH FALSE) #made the switch to FALSE - seems to be working on my Mac (demees@ comment on 2022/Jul/22)
 set(GENERATE_HASHERS ${CMAKE_CURRENT_SOURCE_DIR}/build-tools/bin/generate-java-hash-spi)
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated-java/com/amazon/corretto/crypto/provider)
 set(JNI_HEADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated-include)
