@@ -3,5 +3,25 @@
 		{
 			"path": "."
 		}
-	]
+	],
+	"settings": {
+		// "java.jdt.ls.java.home": "/Library/Java/JavaVirtualMachines/amazon-corretto-18.jdk/Contents/Home",
+		"java.import.gradle.wrapper.enabled": true,		
+		"java.configuration.runtimes": [
+			{
+				"name": "JavaSE-11",
+				// "type": "java-sdk",
+				// "version": "11.0.15",
+				"path": "/Library/Java/JavaVirtualMachines/amazon-corretto-11.jdk/Contents/Home",
+				// "default": true
+			},
+			{
+				"name": "JavaSE-18",
+				// "type": "java-sdk",
+				// "version": "18.0.15",
+				"path": "/Library/Java/JavaVirtualMachines/amazon-corretto-18.jdk/Contents/Home"
+			}
+		],
+		"java.configuration.updateBuildConfiguration": "interactive",
+	}
 }

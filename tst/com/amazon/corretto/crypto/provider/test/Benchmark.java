@@ -31,6 +31,7 @@ import com.amazon.corretto.crypto.provider.AmazonCorrettoCryptoProvider;
 
 public class Benchmark {
     public static void main(String[] args) throws Throwable {
+        
         Security.addProvider(AmazonCorrettoCryptoProvider.INSTANCE);
         benchHashes();
         benchEcGen();
